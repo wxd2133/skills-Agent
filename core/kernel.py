@@ -131,10 +131,9 @@ class ReActKernel:
         # 构建系统提示词（含工具 Schema + 技能操作手册）
         self._system_prompt = _build_system_prompt(skills)
 
-        # 对话历史
-        self.messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt},
-        ]
+        # 对话历史（仅 user/assistant，不含 system；每轮用 system + history 构建消息）
+        self.history: list[dict[str, Any]] = []
+        self.max_steps = Config.MAX_REACT_STEPS
 
         handler.on_status(f"引擎就绪：已加载 {len(self.skills)} 个技能，"
                           f"共 {len(self.tool_registry)} 个工具")
@@ -151,87 +150,81 @@ class ReActKernel:
         返回:
             Agent 的最终回答文本。
         """
-        self.messages.append({"role": "user", "content": user_input})
+        self.history.append({"role": "user", "content": user_input})
 
-        max_steps = Config.MAX_REACT_STEPS
-        step = 1
-
-        while step <= max_steps:
+        step = 0
+        while step < self.max_steps:
             try:
-                # ──── 1. 感知 + 思考：LLM 读取完整对话历史，输出 JSON 决策 ────
-                decision = chat(messages=self.messages)
+                # 1. 构建消息：系统提示 + 完整历史
+                messages = [
+                    {"role": "system", "content": self._system_prompt},
+                ] + self.history
 
-                state = decision.get("state", "thinking")
+                # 2. 调用 LLM
+                decision = chat(messages=messages)
+
+                # 3. 解析并校验 JSON 响应
+                state = decision.get("state", "")
+                if state not in ("thinking", "tool_call", "answer"):
+                    self.history.append({
+                        "role": "user",
+                        "content": "[SYSTEM OBSERVATION]\n"
+                        "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / tool_call / answer），请重新输出。\n"
+                        "[/SYSTEM OBSERVATION]",
+                    })
+                    step += 1
+                    continue
+
                 thought = decision.get("thought", "")
 
-                # 将 LLM 的 JSON 输出记入对话历史
-                self.messages.append({
-                    "role": "assistant",
-                    "content": json.dumps(decision, ensure_ascii=False),
-                })
+                # 4. 分发执行
+                result = ""
 
-                # ──── 2. 根据 state 分派 ────
-
-                if state == "thinking":
-                    # 仅思考 → 展示思考内容，进入下一轮
-                    self.handler.on_think(step, thought)
-                    step += 1
-                    continue
-
-                elif state == "tool_call":
-                    # 调用工具 → 执行并将观察结果写回历史
-                    tool_name = decision.get("tool", "")
-                    tool_args = decision.get("args", {})
-
+                if state == "answer":
                     if thought:
-                        self.handler.on_think(step, thought)
-
-                    self.handler.on_action(step, tool_name, tool_args)
-
-                    # ──── 3. 执行动作 ────
-                    observation = self._execute_tool(tool_name, tool_args)
-                    self.handler.on_observation(step, tool_name, observation)
-
-                    # ──── 4. 将观察结果加入历史，供下一轮感知 ────
-                    self.messages.append({
-                        "role": "user",
-                        "content": json.dumps({
-                            "observation": observation,
-                            "tool": tool_name,
-                        }, ensure_ascii=False),
-                    })
-
-                    step += 1
-                    continue
-
-                elif state == "answer":
-                    # 最终答案 → 结束循环
+                        self.handler.on_think(step + 1, thought)
                     answer = decision.get("answer", "")
-                    if thought:
-                        self.handler.on_think(step, thought)
                     self.handler.on_answer(answer)
                     return answer
 
-                else:
-                    # 未知状态 → 当作思考处理
-                    self.handler.on_think(step, f"(未知状态 '{state}') {thought}")
-                    step += 1
-                    continue
+                elif state == "thinking":
+                    self.handler.on_think(step + 1, thought)
+                    result = "(无)"
+
+                elif state == "tool_call":
+                    tool_name = decision.get("tool", "")
+                    tool_args = decision.get("args", {})
+                    if thought:
+                        self.handler.on_think(step + 1, thought)
+                    self.handler.on_action(step + 1, tool_name, tool_args)
+                    result = self._execute_tool(tool_name, tool_args)
+                    self.handler.on_observation(step + 1, tool_name, result)
+
+                # 5. 将本步结果统一加入历史
+                self.history.append({
+                    "role": "assistant",
+                    "content": json.dumps(decision, ensure_ascii=False),
+                })
+                self.history.append({
+                    "role": "user",
+                    "content": f"[SYSTEM OBSERVATION]\n{result}\n[/SYSTEM OBSERVATION]",
+                })
+
+                step += 1
 
             except Exception as exc:
-                error_msg = f"推理步骤 {step} 出错: {exc}\n{traceback.format_exc()}"
+                error_msg = f"推理步骤 {step + 1} 出错: {exc}\n{traceback.format_exc()}"
                 logger.error(error_msg)
                 self.handler.on_error(error_msg)
                 return f"抱歉，处理过程中发生错误：{exc}"
 
-        # 达到最大步数仍未得到答案
-        exhaust_msg = f"已达到最大推理步数 ({max_steps})，请尝试简化问题。"
+        exhaust_msg = f"已达到最大推理步数 ({self.max_steps})，请尝试简化问题。"
         self.handler.on_error(exhaust_msg)
         return exhaust_msg
 
     def reset(self) -> None:
         """重置对话历史（保留系统提示词）。"""
-        self.messages = [{"role": "system", "content": self._system_prompt}]
+        self.history = []
         self.handler.on_status("对话已重置")
 
     def get_skill_summary(self) -> str:
