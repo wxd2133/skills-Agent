@@ -226,3 +226,29 @@ def build_skill_manuals(skills: list[Skill]) -> str:
         return ""
 
     return "\n\n---\n\n".join(sections)
+
+
+def build_tools_schema(skills: list[Skill]) -> str:
+    """
+    将所有技能的工具名、描述、参数 JSON Schema 格式化为文本，
+    写入系统提示词供模型在 JSON 输出中引用。
+
+    返回:
+        工具定义文本。每个工具一小段。
+    """
+    import json
+
+    if not skills:
+        return "（暂无可用工具）"
+
+    lines: list[str] = []
+    for skill in skills:
+        for tool in skill.tools:
+            params_str = json.dumps(tool.parameters, ensure_ascii=False, indent=2)
+            lines.append(
+                f"### `{tool.name}`\n"
+                f"- 描述: {tool.description}\n"
+                f"- 参数 JSON Schema:\n```json\n{params_str}\n```"
+            )
+
+    return "\n\n".join(lines)

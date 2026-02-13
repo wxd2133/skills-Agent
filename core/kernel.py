@@ -1,6 +1,11 @@
 """
 ReAct 推理引擎（大脑）
-实现 Thought → Action → Observation 循环，驱动 Agent 自主推理与工具调用。
+实现 感知 → 思考 → 执行 循环，通过 JSON 结构化输出驱动状态机。
+
+LLM 每轮输出一个 JSON 对象，包含 state 字段表示当前状态：
+  - "thinking"   : 仅思考，不执行动作
+  - "tool_call"  : 调用一个工具
+  - "answer"     : 提交最终答案，结束循环
 """
 
 from __future__ import annotations
@@ -12,8 +17,11 @@ from typing import Any
 
 from core.config import Config
 from core.handlers import AgentEventHandler
-from core.llm import chat, parse_tool_arguments
-from core.skills import Skill, ToolSpec, build_tool_registry, build_skill_manuals, load_all_skills
+from core.llm import chat
+from core.skills import (
+    Skill, ToolSpec,
+    build_tool_registry, build_skill_manuals, build_tools_schema, load_all_skills,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,40 +31,85 @@ SYSTEM_PROMPT_TEMPLATE = """\
 你是一个强大的 AI 助手（Skill Agent），能够通过调用各种工具来完成用户的任务。
 
 ## 工作方式
-你使用 ReAct（Reasoning + Acting）模式工作：
-1. **思考 (Thought)**: 分析用户需求，规划下一步行动
-2. **行动 (Action)**: 调用合适的工具来获取信息或执行操作
-3. **观察 (Observation)**: 查看工具返回的结果
-4. 重复以上步骤直到得出最终答案
+你使用 ReAct（Reasoning + Acting）模式工作，每轮循环包括：
+1. **感知 (Perception)**: 阅读用户输入和之前的观察结果
+2. **思考 (Thought)**: 分析当前状态，规划下一步行动
+3. **执行 (Action)**: 调用工具获取信息，或提交最终答案
+
+## 输出格式
+你 **必须且只能** 输出一个 JSON 对象，不要输出任何其他文字。
+JSON 中必须包含 `state` 字段，取值为以下三种之一：
+
+### 状态 1: thinking —— 仅思考，不执行动作
+当你还在分析问题、需要更多推理时使用。
+```json
+{{
+  "state": "thinking",
+  "thought": "我的分析和思考过程..."
+}}
+```
+
+### 状态 2: tool_call —— 调用一个工具
+当你决定调用某个工具时使用。每次只能调用一个工具。
+```json
+{{
+  "state": "tool_call",
+  "thought": "我决定调用这个工具的原因...",
+  "tool": "工具名称",
+  "args": {{
+    "参数名": "参数值"
+  }}
+}}
+```
+
+### 状态 3: answer —— 提交最终答案
+当你已经收集到足够的信息，可以回答用户时使用。**只有输出此状态才会结束对话。**
+```json
+{{
+  "state": "answer",
+  "thought": "得出结论的推理过程...",
+  "answer": "给用户的完整最终回答"
+}}
+```
 
 ## 规则
-- 每次只调用一个工具
-- 仔细分析工具返回的结果再做下一步决定
-- 如果工具执行失败，尝试其他方法
-- 当你有足够的信息来回答用户问题时，直接给出最终答案，不要再调用工具
+- 每次只输出一个 JSON 对象
+- 每次只能调用一个工具
+- 仔细分析工具返回的观察结果再做下一步决定
+- 如果工具执行失败，在 thought 中分析原因，尝试其他方法
+- **必须通过 state=answer 提交最终答案**，不要在 thinking 中直接写答案
 - 用中文回答用户问题
+
+{tools_schema}
 {skill_manuals}"""
 
 
 def _build_system_prompt(skills: list[Skill]) -> str:
-    """拼装系统提示词：基础模板 + 技能操作手册。"""
+    """拼装系统提示词：基础模板 + 工具 Schema + 技能操作手册。"""
+    # 工具 JSON Schema 定义
+    tools_schema_text = build_tools_schema(skills)
+    tools_section = f"## 可用工具\n\n{tools_schema_text}" if skills else ""
+
+    # 技能操作手册（Markdown 正文）
     manuals = build_skill_manuals(skills)
-    if manuals:
-        skill_section = (
-            "\n## 技能操作手册\n"
-            "以下是你可用的技能及其详细使用说明，请严格按照手册中的指引调用工具。\n\n"
-            f"{manuals}\n"
-        )
-    else:
-        skill_section = ""
-    return SYSTEM_PROMPT_TEMPLATE.format(skill_manuals=skill_section)
+    manuals_section = (
+        f"## 技能操作手册\n"
+        f"以下是工具的详细使用说明，请严格按照手册中的指引调用。\n\n"
+        f"{manuals}"
+    ) if manuals else ""
+
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        tools_schema=tools_section,
+        skill_manuals=manuals_section,
+    )
 
 
 class ReActKernel:
     """
     ReAct 推理引擎。
-    
-    管理对话历史，执行 Thought-Action-Observation 循环。
+
+    管理对话历史，执行 感知→思考→执行 循环。
+    LLM 输出 JSON，根据 state 字段驱动状态转移。
     """
 
     def __init__(self, handler: AgentEventHandler, skills: list[Skill] | None = None):
@@ -75,7 +128,7 @@ class ReActKernel:
         self.skills = skills
         self.tool_registry: dict[str, ToolSpec] = build_tool_registry(skills)
 
-        # 构建系统提示词（含技能操作手册）
+        # 构建系统提示词（含工具 Schema + 技能操作手册）
         self._system_prompt = _build_system_prompt(skills)
 
         # 对话历史
@@ -100,54 +153,70 @@ class ReActKernel:
         """
         self.messages.append({"role": "user", "content": user_input})
 
-        openai_tools = [tool.to_openai_tool() for tool in self.tool_registry.values()]
+        max_steps = Config.MAX_REACT_STEPS
+        step = 1
 
-        for step in range(1, Config.MAX_REACT_STEPS + 1):
+        while step <= max_steps:
             try:
-                # 调用 LLM
-                assistant_msg = chat(
-                    messages=self.messages,
-                    tools=openai_tools if openai_tools else None,
-                )
+                # ──── 1. 感知 + 思考：LLM 读取完整对话历史，输出 JSON 决策 ────
+                decision = chat(messages=self.messages)
 
-                # 记入对话历史
-                self.messages.append(assistant_msg)
+                state = decision.get("state", "thinking")
+                thought = decision.get("thought", "")
 
-                # 判断是否有工具调用
-                tool_calls = assistant_msg.get("tool_calls")
+                # 将 LLM 的 JSON 输出记入对话历史
+                self.messages.append({
+                    "role": "assistant",
+                    "content": json.dumps(decision, ensure_ascii=False),
+                })
 
-                if not tool_calls:
-                    # 没有工具调用 → LLM 直接给出了最终回答
-                    answer = assistant_msg.get("content", "")
-                    if assistant_msg.get("content"):
-                        self.handler.on_think(step, assistant_msg["content"])
+                # ──── 2. 根据 state 分派 ────
+
+                if state == "thinking":
+                    # 仅思考 → 展示思考内容，进入下一轮
+                    self.handler.on_think(step, thought)
+                    step += 1
+                    continue
+
+                elif state == "tool_call":
+                    # 调用工具 → 执行并将观察结果写回历史
+                    tool_name = decision.get("tool", "")
+                    tool_args = decision.get("args", {})
+
+                    if thought:
+                        self.handler.on_think(step, thought)
+
+                    self.handler.on_action(step, tool_name, tool_args)
+
+                    # ──── 3. 执行动作 ────
+                    observation = self._execute_tool(tool_name, tool_args)
+                    self.handler.on_observation(step, tool_name, observation)
+
+                    # ──── 4. 将观察结果加入历史，供下一轮感知 ────
+                    self.messages.append({
+                        "role": "user",
+                        "content": json.dumps({
+                            "observation": observation,
+                            "tool": tool_name,
+                        }, ensure_ascii=False),
+                    })
+
+                    step += 1
+                    continue
+
+                elif state == "answer":
+                    # 最终答案 → 结束循环
+                    answer = decision.get("answer", "")
+                    if thought:
+                        self.handler.on_think(step, thought)
                     self.handler.on_answer(answer)
                     return answer
 
-                # 有工具调用 → 执行 Action
-                # 先输出思考内容（如果有）
-                if assistant_msg.get("content"):
-                    self.handler.on_think(step, assistant_msg["content"])
-
-                for tc in tool_calls:
-                    func_name = tc["function"]["name"]
-                    func_args_raw = tc["function"]["arguments"]
-                    func_args = parse_tool_arguments(func_args_raw)
-                    call_id = tc["id"]
-
-                    self.handler.on_action(step, func_name, func_args)
-
-                    # 执行工具
-                    result = self._execute_tool(func_name, func_args)
-
-                    self.handler.on_observation(step, func_name, result)
-
-                    # 将工具结果加入对话历史
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": result,
-                    })
+                else:
+                    # 未知状态 → 当作思考处理
+                    self.handler.on_think(step, f"(未知状态 '{state}') {thought}")
+                    step += 1
+                    continue
 
             except Exception as exc:
                 error_msg = f"推理步骤 {step} 出错: {exc}\n{traceback.format_exc()}"
@@ -155,8 +224,8 @@ class ReActKernel:
                 self.handler.on_error(error_msg)
                 return f"抱歉，处理过程中发生错误：{exc}"
 
-        # 超过最大步数
-        exhaust_msg = f"已达到最大推理步数 ({Config.MAX_REACT_STEPS})，请尝试简化问题。"
+        # 达到最大步数仍未得到答案
+        exhaust_msg = f"已达到最大推理步数 ({max_steps})，请尝试简化问题。"
         self.handler.on_error(exhaust_msg)
         return exhaust_msg
 
