@@ -234,6 +234,12 @@ class ReActKernel:
             if thought:
                 self.handler.on_think(step, thought)
             self.handler.on_action(step, tool_name, tool_args)
+            tool = self.tool_registry.get(tool_name)
+            if tool and getattr(tool, "needs_confirmation", False):
+                if not self.handler.confirm_dangerous(step, tool_name, tool_args):
+                    result = "用户未确认，已取消。"
+                    self.handler.on_observation(step, tool_name, result)
+                    return (None, result)
             result = self._execute_tool(tool_name, tool_args)
             self.handler.on_observation(step, tool_name, result)
             return (None, result)

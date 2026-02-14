@@ -71,11 +71,12 @@ class ToolSpec:
     """单个工具的规格说明（对应 OpenAI function calling 的格式）。"""
 
     def __init__(self, name: str, description: str, parameters: dict[str, Any],
-                 execute_fn: Callable[..., str]):
+                 execute_fn: Callable[..., str], needs_confirmation: bool = False):
         self.name = name
         self.description = description
         self.parameters = parameters        # JSON Schema
         self.execute_fn = execute_fn        # 实际执行函数
+        self.needs_confirmation = needs_confirmation  # 危险操作，执行前需用户确认
 
     def to_openai_tool(self) -> dict[str, Any]:
         """转为 OpenAI tools 参数格式。"""
@@ -150,12 +151,14 @@ def _load_skill(skill_dir: Path) -> Skill | None:
 
         # 工具描述：优先用 frontmatter 中的，否则从 Markdown 正文无法自动提取，留空
         tool_desc = tool_def.get("description", "")
+        needs_confirmation = bool(tool_def.get("needs_confirmation", False))
 
         tools.append(ToolSpec(
             name=tool_def["name"],
             description=tool_desc,
             parameters=tool_def.get("parameters", {"type": "object", "properties": {}}),
             execute_fn=fn,
+            needs_confirmation=needs_confirmation,
         ))
 
     if not tools:

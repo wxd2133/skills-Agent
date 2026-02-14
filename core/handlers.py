@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -39,6 +40,22 @@ class AgentEventHandler(ABC):
             tool_name: 工具名称
             tool_args: 工具调用参数
         """
+
+    def confirm_dangerous(self, step: int, tool_name: str, tool_args: dict[str, Any]) -> bool:
+        """
+        危险操作（如删除）执行前询问用户是否确认。
+        若返回 False，该工具将不执行并视为「用户取消」。
+
+        参数:
+            step:      当前推理步骤编号
+            tool_name: 工具名称
+            tool_args: 工具调用参数
+
+        返回:
+            True 表示用户确认执行，False 表示取消。
+        默认实现：直接返回 True（不拦截，适用于无交互场景）。
+        """
+        return True
 
     @abstractmethod
     def on_observation(self, step: int, tool_name: str, result: str) -> None:
@@ -89,6 +106,19 @@ class PrintHandler(AgentEventHandler):
     def on_action(self, step: int, tool_name: str, tool_args: dict[str, Any]) -> None:
         print(f"🔧 [步骤 {step}] 调用工具: {tool_name}")
         print(f"   参数: {tool_args}")
+
+    def confirm_dangerous(self, step: int, tool_name: str, tool_args: dict[str, Any]) -> bool:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        print(f"\n⚠️  [危险操作] {tool_name} 参数: {tool_args}")
+        print("    是否确认执行? 输入 y/yes/是 确认，其他或直接回车取消: ", end="")
+        sys.stdout.flush()
+        try:
+            ans = input().strip().lower()
+            return ans in ("y", "yes", "是")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
 
     def on_observation(self, step: int, tool_name: str, result: str) -> None:
         print(f"👁️  [步骤 {step}] 观察结果 ({tool_name}):")

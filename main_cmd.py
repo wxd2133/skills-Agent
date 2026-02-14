@@ -23,6 +23,22 @@ from core.kernel import ReActKernel
 console = Console()
 
 
+class CmdHandler(PrintHandler):
+    """CLI 用处理器：危险操作确认使用 Rich 输出与输入，确保在 CMD 下可见。"""
+
+    def confirm_dangerous(self, step: int, tool_name: str, tool_args: dict) -> bool:
+        from rich.prompt import Confirm
+        path = tool_args.get("path", "")
+        msg = f"即将执行: [bold red]{tool_name}[/bold red] 参数: {tool_args}"
+        if path:
+            msg = f"即将删除: [bold yellow]{path}[/bold yellow]（工作区内）"
+        console.print()
+        try:
+            return Confirm.ask("是否确认?", default=False, console=console)
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+
 def print_banner() -> None:
     """打印启动横幅。"""
     banner = Text()
@@ -73,7 +89,7 @@ def main() -> None:
 
     # 初始化
     print_banner()
-    handler = PrintHandler()
+    handler = CmdHandler()
     kernel = ReActKernel(handler=handler)
 
     console.print(f"\n{kernel.get_skill_summary()}\n")
