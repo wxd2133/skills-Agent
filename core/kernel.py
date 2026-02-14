@@ -139,85 +139,27 @@ class ReActKernel:
             Agent 的最终回答文本。
         """
         self.history.append({"role": "user", "content": user_input})
-
         step = 0
+
         while step < self.max_steps:
             try:
-                # 1. 构建消息：系统提示 + 完整历史
-                messages = [
-                    {"role": "system", "content": self._system_prompt},
-                ] + self.history
-
-                # 2. 调用 LLM
-                decision = chat(messages=messages)
-
-                # 3. 解析并校验 JSON 响应
-                state = decision.get("state", "")
-                if state not in ("thinking", "view_skill", "tool_call", "answer"):
-                    self.history.append({
-                        "role": "user",
-                        "content": "[SYSTEM OBSERVATION]\n"
-                        "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / view_skill / tool_call / answer），请重新输出。\n"
-                        "[/SYSTEM OBSERVATION]",
-                    })
+                decision = chat(messages=self._build_messages())
+                if self._push_invalid_decision_feedback(decision):
                     step += 1
                     continue
 
-                thought = decision.get("thought", "")
-
-                # 4. 分发执行
-                result = ""
-
-                if state == "answer":
-                    if thought:
-                        self.handler.on_think(step + 1, thought)
-                    answer = decision.get("answer", "")
-                    self.handler.on_answer(answer)
+                answer, observation = self._execute_decision(decision, step + 1)
+                if answer is not None:
                     return answer
 
-                elif state == "thinking":
-                    self.handler.on_think(step + 1, thought)
-                    result = "(无)"
-
-                elif state == "view_skill":
-                    skill_name = (decision.get("skill") or "").strip()
-                    if thought:
-                        self.handler.on_think(step + 1, thought)
-                    self.handler.on_action(step + 1, "view_skill", {"skill": skill_name})
-                    result = self._get_skill_manual(skill_name)
-                    # 完整说明写入 history 供 Agent 使用，界面只提示已加载、不输出长文档
-                    self.handler.on_observation(step + 1, "view_skill", f"已加载「{skill_name}」完整说明")
-
-                elif state == "tool_call":
-                    tool_name = decision.get("tool", "")
-                    tool_args = decision.get("args", {})
-                    if thought:
-                        self.handler.on_think(step + 1, thought)
-                    self.handler.on_action(step + 1, tool_name, tool_args)
-                    result = self._execute_tool(tool_name, tool_args)
-                    self.handler.on_observation(step + 1, tool_name, result)
-
-                # 5. 将本步结果统一加入历史
-                self.history.append({
-                    "role": "assistant",
-                    "content": json.dumps(decision, ensure_ascii=False),
-                })
-                self.history.append({
-                    "role": "user",
-                    "content": f"[SYSTEM OBSERVATION]\n{result}\n[/SYSTEM OBSERVATION]",
-                })
-
+                self._append_step_to_history(decision, observation)
                 step += 1
-
             except Exception as exc:
-                error_msg = f"推理步骤 {step + 1} 出错: {exc}\n{traceback.format_exc()}"
-                logger.error(error_msg)
-                self.handler.on_error(error_msg)
+                self._report_step_error(step + 1, exc)
                 return f"抱歉，处理过程中发生错误：{exc}"
 
-        exhaust_msg = f"已达到最大推理步数 ({self.max_steps})，请尝试简化问题。"
-        self.handler.on_error(exhaust_msg)
-        return exhaust_msg
+        self.handler.on_error(f"已达到最大推理步数 ({self.max_steps})，请尝试简化问题。")
+        return f"已达到最大推理步数 ({self.max_steps})，请尝试简化问题。"
 
     def reset(self) -> None:
         """重置对话历史（保留系统提示词）。"""
@@ -240,6 +182,80 @@ class ReActKernel:
         return _get_prompt_snippet(self.skills)
 
     # ---------- 内部方法 ----------
+
+    def _build_messages(self) -> list[dict[str, Any]]:
+        """系统提示 + 完整历史，供本轮 LLM 调用。"""
+        return [{"role": "system", "content": self._system_prompt}] + self.history
+
+    def _push_invalid_decision_feedback(self, decision: dict[str, Any]) -> bool:
+        """若 state 非法则追加反馈到 history 并返回 True，否则返回 False。"""
+        state = decision.get("state", "")
+        if state in ("thinking", "view_skill", "tool_call", "answer"):
+            return False
+        self.history.append({
+            "role": "user",
+            "content": "[SYSTEM OBSERVATION]\n"
+            "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / view_skill / tool_call / answer），请重新输出。\n"
+            "[/SYSTEM OBSERVATION]",
+        })
+        return True
+
+    def _execute_decision(self, decision: dict[str, Any], step: int) -> tuple[str | None, str]:
+        """
+        按 state 分发执行，通知 handler，返回 (最终答案或 None, 本步观察结果)。
+        若 state==answer 则返回 (answer_text, "")，否则返回 (None, observation)。
+        """
+        state = decision.get("state", "")
+        thought = decision.get("thought", "")
+
+        if state == "answer":
+            if thought:
+                self.handler.on_think(step, thought)
+            answer = decision.get("answer", "")
+            self.handler.on_answer(answer)
+            return (answer, "")
+
+        if state == "thinking":
+            self.handler.on_think(step, thought)
+            return (None, "(无)")
+
+        if state == "view_skill":
+            skill_name = (decision.get("skill") or "").strip()
+            if thought:
+                self.handler.on_think(step, thought)
+            self.handler.on_action(step, "view_skill", {"skill": skill_name})
+            full_manual = self._get_skill_manual(skill_name)
+            self.handler.on_observation(step, "view_skill", f"已加载「{skill_name}」完整说明")
+            return (None, full_manual)
+
+        if state == "tool_call":
+            tool_name = decision.get("tool", "")
+            tool_args = decision.get("args", {})
+            if thought:
+                self.handler.on_think(step, thought)
+            self.handler.on_action(step, tool_name, tool_args)
+            result = self._execute_tool(tool_name, tool_args)
+            self.handler.on_observation(step, tool_name, result)
+            return (None, result)
+
+        return (None, "(无)")
+
+    def _append_step_to_history(self, decision: dict[str, Any], observation: str) -> None:
+        """将本步 assistant 输出与观察结果统一追加到 history。"""
+        self.history.append({
+            "role": "assistant",
+            "content": json.dumps(decision, ensure_ascii=False),
+        })
+        self.history.append({
+            "role": "user",
+            "content": f"[SYSTEM OBSERVATION]\n{observation}\n[/SYSTEM OBSERVATION]",
+        })
+
+    def _report_step_error(self, step: int, exc: Exception) -> None:
+        """记录异常并通知 handler。"""
+        error_msg = f"推理步骤 {step} 出错: {exc}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        self.handler.on_error(error_msg)
 
     def _get_skill_manual(self, skill_name: str) -> str:
         """按技能名称返回该技能的完整操作手册（SKILL.md 正文）。"""
