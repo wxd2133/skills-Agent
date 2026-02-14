@@ -116,6 +116,26 @@ def draw_shape(shape: str, width: int, height: int, fill: str = "*") -> str:
     return f"错误：不支持的形状 '{shape}'，可选 rectangle / triangle / diamond"
 
 
+def draw_ascii_art(lines: list[str], width: int | None = None) -> str:
+    """
+    按行拼接字符画，保证对齐。用于猫、脸等多行组合图，避免在回答里手排错位。
+
+    参数:
+        lines: 每一行字符串，从上到下顺序
+        width: 可选；若给出，则每行右侧补空格到该宽度，保证所有行等长
+
+    返回:
+        多行字符串。
+    """
+    if not lines:
+        return "错误：lines 不能为空"
+    lines = [str(ln) for ln in lines]
+    if width is not None and int(width) > 0:
+        w = int(width)
+        lines = [ln[:w].ljust(w) for ln in lines]
+    return "\n".join(lines)
+
+
 def draw_bar(items: list[dict], bar_width: int = 20) -> str:
     """
     绘制横向条形图。

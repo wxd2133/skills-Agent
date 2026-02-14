@@ -62,6 +62,21 @@ tools:
         - width
         - height
 
+  - name: draw_ascii_art
+    function: draw_ascii_art
+    parameters:
+      type: object
+      properties:
+        lines:
+          type: array
+          items: { type: string }
+          description: "字符画的每一行，从上到下顺序"
+        width:
+          type: integer
+          description: "可选；每行右侧补空格到此宽度，保证所有行等长、对齐"
+      required:
+        - lines
+
   - name: draw_bar
     function: draw_bar
     parameters:
@@ -153,6 +168,37 @@ draw_box(width=20, height=5, title="提示")
 draw_shape(shape="rectangle", width=10, height=4)
 draw_shape(shape="triangle", width=9, height=5, fill="#")
 draw_shape(shape="diamond", width=9, height=5)
+```
+
+---
+
+### `draw_ascii_art` — 按行拼接字符画（保证对齐）
+
+把多行字符串按顺序拼成一块字符画，由工具统一输出，**避免在回答里手排导致耳朵歪、身体少列**。
+
+**何时使用：** 画猫、脸、多行组合图等，需要精确对齐时。先用 `draw_shape` 得到耳朵、身体等单块，再**自己算出每行应有的完整内容**，用 `draw_ascii_art(lines=..., width=...)` 一次性输出；或直接给出整幅图的每行内容。
+
+**参数说明：**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `lines` | array of string | ✅ | 字符画每一行，从上到下顺序 |
+| `width` | integer | ❌ | 若提供，每行右侧补空格到该宽度，保证所有行等长、列对齐 |
+
+**对齐建议：** 画图时，先定整幅图宽度，用 `width` 让每行等长，避免错位。
+
+**调用示例：**
+```
+draw_ascii_art(lines=[
+  ",     ,",
+  "       /(     )\\",
+  "      (  \\ _ /  )",
+  "      (  (o o)  )",
+  "      (   <    )",
+  "       (  \"\"\"  )",
+  "        \\     /",
+  "      /` `---' `\\",
+  "     / /`     `\\ \\"
+], width=19)
 ```
 
 ---
