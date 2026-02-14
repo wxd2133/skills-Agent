@@ -93,7 +93,7 @@ class PrintHandler(AgentEventHandler):
     def on_observation(self, step: int, tool_name: str, result: str) -> None:
         print(f"👁️  [步骤 {step}] 观察结果 ({tool_name}):")
         max_len = Config.OBSERVATION_DISPLAY_MAX_LENGTH
-        display = result if max_len <= 0 or len(result) <= max_len else result[:max_len] + "\n... (已截断)"
+        display = result if max_len <= 0 or len(result) <= max_len else result[:max_len] + "\n... (超长部分已省略)"
         print(f"   {display}")
 
     def on_answer(self, answer: str) -> None:

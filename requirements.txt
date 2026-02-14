@@ -13,6 +13,7 @@ tkinter-tooltip>=3.1.0
 # 工具库
 rich>=13.7.0            # 终端美化输出
 pydantic>=2.6.0         # 数据校验
+tabulate>=0.9.0          # 表格绘制（draw-tools）
 
 # 数学技能依赖
 sympy>=1.12             # 符号计算

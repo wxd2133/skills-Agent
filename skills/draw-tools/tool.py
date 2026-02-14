@@ -1,14 +1,16 @@
 """
 字符绘制技能 - 工具实现
-使用 ASCII/Unicode 字符绘制表格、方框、简单形状和条形图。
+表格使用 tabulate 库；方框与条形图为手绘。
 """
 
 from __future__ import annotations
 
+from tabulate import tabulate
+
 
 def draw_table(headers: list[str], rows: list[list[str]]) -> str:
     """
-    绘制带边框的文本表格。
+    绘制带边框的文本表格（使用 tabulate 库，grid 格式）。
 
     参数:
         headers: 表头列名列表
@@ -20,42 +22,20 @@ def draw_table(headers: list[str], rows: list[list[str]]) -> str:
     if not headers:
         return "错误：表头不能为空"
 
-    # 确保每行长度与表头一致
     cols = len(headers)
-    data = [headers] + [[str(cell) for cell in row] for row in rows]
-    for row in data:
+    data_rows = [[str(cell) for cell in row] for row in rows]
+    for row in data_rows:
         while len(row) < cols:
             row.append("")
         if len(row) > cols:
             row[:] = row[:cols]
 
-    # 计算每列最大宽度
-    widths = []
-    for c in range(cols):
-        widths.append(max(len(str(data[r][c])) for r in range(len(data))) if data else 0)
-        widths[c] = max(widths[c], 1)
-
-    # 边框字符（ASCII 兼容）
-    h = "-"
-    v = "|"
-    tl, tr, bl, br = "+", "+", "+", "+"
-    lc, rc, tc, bc = "+", "+", "+", "+"
-
-    def sep(char: str) -> str:
-        return tl + char.join(h * w for w in widths) + tr
-
-    def row_cells(cells: list[str]) -> str:
-        return v + v.join(
-            str(cells[i]).ljust(widths[i]) if i < len(cells) else "".ljust(widths[i])
-            for i in range(cols)
-        ) + v
-
-    lines = [sep(h), row_cells(data[0]), sep(h)]
-    for r in range(1, len(data)):
-        lines.append(row_cells(data[r]))
-    lines.append(sep(h))
-
-    return "\n".join(lines)
+    return tabulate(
+        data_rows,
+        headers=headers,
+        tablefmt="grid",
+        stralign="left",
+    )
 
 
 def draw_box(width: int, height: int, title: str = "") -> str:

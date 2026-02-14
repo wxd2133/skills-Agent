@@ -4,6 +4,7 @@ ReAct 推理引擎（大脑）
 
 LLM 每轮输出一个 JSON 对象，包含 state 字段表示当前状态：
   - "thinking"   : 仅思考，不执行动作
+  - "view_skill" : 查看某技能的完整说明（渐进式披露）
   - "tool_call"  : 调用一个工具
   - "answer"     : 提交最终答案，结束循环
 """
@@ -20,7 +21,7 @@ from core.handlers import AgentEventHandler
 from core.llm import chat
 from core.skills import (
     Skill, ToolSpec,
-    build_tool_registry, build_skill_manuals, build_tools_schema, load_all_skills,
+    build_tool_registry, load_all_skills,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,70 +39,57 @@ SYSTEM_PROMPT_TEMPLATE = """\
 
 ## 输出格式
 你 **必须且只能** 输出一个 JSON 对象，不要输出任何其他文字。
-JSON 中必须包含 `state` 字段，取值为以下三种之一：
+JSON 中必须包含 `state` 字段，取值为以下四种之一：
 
 ### 状态 1: thinking —— 仅思考，不执行动作
 当你还在分析问题、需要更多推理时使用。
 ```json
-{{
-  "state": "thinking",
-  "thought": "我的分析和思考过程..."
-}}
+{{ "state": "thinking", "thought": "我的分析和思考过程..." }}
 ```
 
-### 状态 2: tool_call —— 调用一个工具
-当你决定调用某个工具时使用。每次只能调用一个工具。
+### 状态 2: view_skill —— 查看某技能的完整说明（渐进式披露）
+**当你要使用某技能时，必须先通过 view_skill 加载该技能的完整文档**（含工具名称、参数与用法），再使用 tool_call。
 ```json
-{{
-  "state": "tool_call",
-  "thought": "我决定调用这个工具的原因...",
-  "tool": "工具名称",
-  "args": {{
-    "参数名": "参数值"
-  }}
-}}
+{{ "state": "view_skill", "thought": "我需要使用该技能的原因...", "skill": "技能名称" }}
+```
+技能名称必须是下方「可用技能」列表中的名称（如 math-tools、draw-tools、web-search）。
+
+### 状态 3: tool_call —— 调用一个工具
+在通过 view_skill 查看过该技能的完整说明后，再调用具体工具。每次只能调用一个工具。
+```json
+{{ "state": "tool_call", "thought": "...", "tool": "工具名称", "args": {{ "参数名": "参数值" }} }}
 ```
 
-### 状态 3: answer —— 提交最终答案
+### 状态 4: answer —— 提交最终答案
 当你已经收集到足够的信息，可以回答用户时使用。**只有输出此状态才会结束对话。**
 ```json
-{{
-  "state": "answer",
-  "thought": "得出结论的推理过程...",
-  "answer": "给用户的完整最终回答"
-}}
+{{ "state": "answer", "thought": "...", "answer": "给用户的完整最终回答" }}
 ```
 
 ## 规则
 - 每次只输出一个 JSON 对象
+- **使用某技能前必须先 view_skill 该技能**，再根据文档中的工具说明进行 tool_call
 - 每次只能调用一个工具
-- 仔细分析工具返回的观察结果再做下一步决定
-- 如果工具执行失败，在 thought 中分析原因，尝试其他方法
-- **必须通过 state=answer 提交最终答案**，不要在 thinking 中直接写答案
+- 仔细分析观察结果再做下一步决定
+- **必须通过 state=answer 提交最终答案**
 - 用中文回答用户问题
 
-{tools_schema}
-{skill_manuals}"""
+## 可用技能（仅摘要；完整说明请通过 view_skill 加载）
+{skill_snippet}"""
+
+
+def _get_prompt_snippet(skills: list[Skill]) -> str:
+    """生成注入到 System Prompt 的技能列表摘要（渐进式披露：仅名称与简短描述）。"""
+    if not skills:
+        return "（暂无可用技能）"
+    lines = [f"- **{s.name}**: {s.description}" for s in skills]
+    return "\n".join(lines)
 
 
 def _build_system_prompt(skills: list[Skill]) -> str:
-    """拼装系统提示词：基础模板 + 工具 Schema + 技能操作手册。"""
-    # 工具 JSON Schema 定义
-    tools_schema_text = build_tools_schema(skills)
-    tools_section = f"## 可用工具\n\n{tools_schema_text}" if skills else ""
-
-    # 技能操作手册（Markdown 正文）
-    manuals = build_skill_manuals(skills)
-    manuals_section = (
-        f"## 技能操作手册\n"
-        f"以下是工具的详细使用说明，请严格按照手册中的指引调用。\n\n"
-        f"{manuals}"
-    ) if manuals else ""
-
-    return SYSTEM_PROMPT_TEMPLATE.format(
-        tools_schema=tools_section,
-        skill_manuals=manuals_section,
-    )
+    """拼装系统提示词：基础模板 + 技能摘要（不含完整手册，由 view_skill 按需加载）。"""
+    snippet = _get_prompt_snippet(skills)
+    return SYSTEM_PROMPT_TEMPLATE.format(skill_snippet=snippet)
 
 
 class ReActKernel:
@@ -165,11 +153,11 @@ class ReActKernel:
 
                 # 3. 解析并校验 JSON 响应
                 state = decision.get("state", "")
-                if state not in ("thinking", "tool_call", "answer"):
+                if state not in ("thinking", "view_skill", "tool_call", "answer"):
                     self.history.append({
                         "role": "user",
                         "content": "[SYSTEM OBSERVATION]\n"
-                        "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / tool_call / answer），请重新输出。\n"
+                        "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / view_skill / tool_call / answer），请重新输出。\n"
                         "[/SYSTEM OBSERVATION]",
                     })
                     step += 1
@@ -190,6 +178,15 @@ class ReActKernel:
                 elif state == "thinking":
                     self.handler.on_think(step + 1, thought)
                     result = "(无)"
+
+                elif state == "view_skill":
+                    skill_name = (decision.get("skill") or "").strip()
+                    if thought:
+                        self.handler.on_think(step + 1, thought)
+                    self.handler.on_action(step + 1, "view_skill", {"skill": skill_name})
+                    result = self._get_skill_manual(skill_name)
+                    # 完整说明写入 history 供 Agent 使用，界面只提示已加载、不输出长文档
+                    self.handler.on_observation(step + 1, "view_skill", f"已加载「{skill_name}」完整说明")
 
                 elif state == "tool_call":
                     tool_name = decision.get("tool", "")
@@ -238,7 +235,23 @@ class ReActKernel:
             lines.append("  （暂无技能）")
         return "\n".join(lines)
 
+    def get_prompt_snippet(self) -> str:
+        """生成注入到 System Prompt 的技能列表摘要（供外部查看）。"""
+        return _get_prompt_snippet(self.skills)
+
     # ---------- 内部方法 ----------
+
+    def _get_skill_manual(self, skill_name: str) -> str:
+        """按技能名称返回该技能的完整操作手册（SKILL.md 正文）。"""
+        if not skill_name:
+            return "错误：view_skill 未指定技能名称。"
+        for skill in self.skills:
+            if skill.name == skill_name:
+                if skill.manual:
+                    return f"# {skill.name}\n\n{skill.manual}"
+                return f"技能「{skill.name}」暂无完整说明文档。"
+        available = "、".join(s.name for s in self.skills)
+        return f"错误：未找到技能「{skill_name}」。可用技能：{available}"
 
     def _execute_tool(self, name: str, args: dict[str, Any]) -> str:
         """

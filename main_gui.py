@@ -71,15 +71,18 @@ class SkillAgentApp:
 
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("🤖 Skill Agent - ReAct 推理引擎")
+        self.root.title("Skill Agent")
         self.root.geometry("800x600")
         self.root.minsize(600, 400)
 
-        # 配色
-        self.bg_color = "#1e1e2e"
-        self.fg_color = "#cdd6f4"
-        self.input_bg = "#313244"
-        self.accent_color = "#89b4fa"
+        # 黑白色系 · 苹果风（浅色）
+        self.bg_color = "#f5f5f7"
+        self.fg_color = "#1d1d1f"
+        self.fg_secondary = "#6e6e73"
+        self.input_bg = "#ffffff"
+        self.border_color = "#d2d2d7"
+        self.accent_color = "#1d1d1f"
+        self.chat_bg = "#ffffff"
 
         self.root.configure(bg=self.bg_color)
 
@@ -92,14 +95,15 @@ class SkillAgentApp:
         toolbar = tk.Frame(self.root, bg=self.bg_color, pady=5)
         toolbar.pack(fill=tk.X, padx=10)
 
-        title_label = tk.Label(toolbar, text="🤖 Skill Agent",
+        title_label = tk.Label(toolbar, text="Skill Agent",
                                font=("Segoe UI", 14, "bold"),
-                               bg=self.bg_color, fg=self.accent_color)
+                               bg=self.bg_color, fg=self.fg_color)
         title_label.pack(side=tk.LEFT)
 
-        # 按钮
-        btn_style = {"bg": "#45475a", "fg": self.fg_color, "relief": "flat",
-                     "padx": 10, "pady": 3, "font": ("Segoe UI", 9)}
+        # 按钮：浅灰底、黑字、细边框
+        btn_style = {"bg": "#e8e8ed", "fg": self.fg_color, "relief": "flat",
+                     "padx": 12, "pady": 4, "font": ("Segoe UI", 9),
+                     "activebackground": "#d2d2d7", "activeforeground": self.fg_color}
 
         btn_reset = tk.Button(toolbar, text="🔄 重置", command=self._on_reset, **btn_style)
         btn_reset.pack(side=tk.RIGHT, padx=3)
@@ -114,27 +118,29 @@ class SkillAgentApp:
         chat_frame = tk.Frame(self.root, bg=self.bg_color)
         chat_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 5))
 
+        # 聊天区使用等宽字体，表格与字符画才能对齐
+        self._chat_font = ("Consolas", 10)
         self.chat_display = scrolledtext.ScrolledText(
             chat_frame,
             wrap=tk.WORD,
-            font=("Consolas", 10),
-            bg="#181825",
+            font=self._chat_font,
+            bg=self.chat_bg,
             fg=self.fg_color,
             insertbackground=self.fg_color,
             relief="flat",
             state=tk.DISABLED,
-            padx=10, pady=10,
+            padx=12, pady=12,
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True)
 
-        # 文本标签样式
-        self.chat_display.tag_config("user", foreground="#a6e3a1", font=("Consolas", 10, "bold"))
-        self.chat_display.tag_config("think", foreground="#94e2d5")
-        self.chat_display.tag_config("action", foreground="#f9e2af")
-        self.chat_display.tag_config("observation", foreground="#89b4fa")
-        self.chat_display.tag_config("answer", foreground="#a6e3a1")
-        self.chat_display.tag_config("error", foreground="#f38ba8")
-        self.chat_display.tag_config("status", foreground="#6c7086")
+        # 文本标签：黑白色系（统一等宽字体以保持表格对齐）
+        self.chat_display.tag_config("user", foreground="#1d1d1f", font=("Consolas", 10, "bold"))
+        self.chat_display.tag_config("think", foreground="#424245")
+        self.chat_display.tag_config("action", foreground="#6e6e73")
+        self.chat_display.tag_config("observation", foreground="#424245")
+        self.chat_display.tag_config("answer", foreground="#1d1d1f", font=("Consolas", 10, "bold"))
+        self.chat_display.tag_config("error", foreground="#1d1d1f")
+        self.chat_display.tag_config("status", foreground=self.fg_secondary)
 
         # --- 输入区域 ---
         input_frame = tk.Frame(self.root, bg=self.bg_color)
@@ -147,19 +153,24 @@ class SkillAgentApp:
             fg=self.fg_color,
             insertbackground=self.fg_color,
             relief="flat",
+            highlightthickness=1,
+            highlightbackground=self.border_color,
+            highlightcolor=self.fg_color,
         )
         self.input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
         self.input_entry.bind("<Return>", self._on_send)
 
         self.send_btn = tk.Button(
             input_frame,
-            text="发送 ▶",
+            text="发送",
             command=self._on_send,
             bg=self.accent_color,
-            fg="#1e1e2e",
+            fg="#ffffff",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
-            padx=15, pady=5,
+            padx=16, pady=5,
+            activebackground="#424245",
+            activeforeground="#ffffff",
         )
         self.send_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
@@ -167,8 +178,8 @@ class SkillAgentApp:
         self.status_var = tk.StringVar(value="就绪")
         status_bar = tk.Label(
             self.root, textvariable=self.status_var,
-            bg="#11111b", fg="#6c7086",
-            font=("Segoe UI", 9), anchor="w", padx=10,
+            bg=self.bg_color, fg=self.fg_secondary,
+            font=("Segoe UI", 9), anchor="w", padx=12,
         )
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
