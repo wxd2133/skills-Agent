@@ -51,6 +51,7 @@ def chat(
         "model": model or Config.OPENAI_MODEL,
         "messages": messages,
         "temperature": temperature if temperature is not None else Config.TEMPERATURE,
+        "max_tokens": Config.MAX_COMPLETION_TOKENS,
         "response_format": {"type": "json_object"},
     }
 

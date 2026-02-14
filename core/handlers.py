@@ -8,6 +8,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from core.config import Config
+
 
 class AgentEventHandler(ABC):
     """
@@ -90,8 +92,8 @@ class PrintHandler(AgentEventHandler):
 
     def on_observation(self, step: int, tool_name: str, result: str) -> None:
         print(f"👁️  [步骤 {step}] 观察结果 ({tool_name}):")
-        # 截断过长输出
-        display = result if len(result) <= 500 else result[:500] + "\n... (已截断)"
+        max_len = Config.OBSERVATION_DISPLAY_MAX_LENGTH
+        display = result if max_len <= 0 or len(result) <= max_len else result[:max_len] + "\n... (已截断)"
         print(f"   {display}")
 
     def on_answer(self, answer: str) -> None:

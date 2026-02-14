@@ -19,6 +19,9 @@ from core.config import Config
 from core.handlers import AgentEventHandler
 from core.kernel import ReActKernel
 
+# 观察结果在 GUI 中的展示长度（0=不截断）
+OBSERVATION_DISPLAY_MAX = Config.OBSERVATION_DISPLAY_MAX_LENGTH
+
 
 # ---------- GUI 事件处理器 ----------
 
@@ -45,7 +48,8 @@ class GuiHandler(AgentEventHandler):
         self._append(f"🔧 [步骤 {step}] 调用工具: {tool_name}\n   参数: {tool_args}", "action")
 
     def on_observation(self, step: int, tool_name: str, result: str) -> None:
-        display = result if len(result) <= 300 else result[:300] + "\n... (已截断)"
+        max_len = OBSERVATION_DISPLAY_MAX
+        display = result if max_len <= 0 or len(result) <= max_len else result[:max_len] + "\n... (已截断)"
         self._append(f"👁️ [步骤 {step}] 结果 ({tool_name}):\n   {display}", "observation")
 
     def on_answer(self, answer: str) -> None:

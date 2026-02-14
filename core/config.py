@@ -23,9 +23,12 @@ class Config:
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
     TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.7"))
+    MAX_COMPLETION_TOKENS: int = int(os.getenv("MAX_COMPLETION_TOKENS", "4096"))  # 单轮最大输出 token 数，防止思考被截断
 
     # --- Agent 相关 ---
     MAX_REACT_STEPS: int = int(os.getenv("MAX_REACT_STEPS", "10"))
+    # 观察结果在界面展示时的最大字符数，0 表示不截断
+    OBSERVATION_DISPLAY_MAX_LENGTH: int = int(os.getenv("OBSERVATION_DISPLAY_MAX_LENGTH", "2000"))
 
     # --- 路径相关 ---
     SKILLS_DIR: Path = PROJECT_ROOT / "skills"
@@ -50,7 +53,9 @@ class Config:
             f"API Base: {cls.OPENAI_BASE_URL}\n"
             f"API Key: {masked_key}\n"
             f"温度: {cls.TEMPERATURE}\n"
+            f"最大输出长度: {cls.MAX_COMPLETION_TOKENS} tokens\n"
             f"最大推理步数: {cls.MAX_REACT_STEPS}\n"
+            f"观察展示长度: {cls.OBSERVATION_DISPLAY_MAX_LENGTH} 字符（0=不截断）\n"
             f"技能目录: {cls.SKILLS_DIR}\n"
             f"工作区: {cls.WORKSPACE_DIR}"
         )

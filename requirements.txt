@@ -16,3 +16,6 @@ pydantic>=2.6.0         # 数据校验
 
 # 数学技能依赖
 sympy>=1.12             # 符号计算
+
+# 网页搜索技能（原 duckduckgo-search 已改名为 ddgs）
+ddgs>=9.0               # 网页搜索（无需 API Key）
