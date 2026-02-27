@@ -1,9 +1,45 @@
 """
 网页搜索技能 - 工具实现
-使用 ddgs（原 duckduckgo_search）进行网页搜索，无需 API Key。
+使用 ddgs（原 duckduckgo_search）进行网页搜索，无需 API Key；
+提供获取当前日期时间功能。
 """
 
 from __future__ import annotations
+
+from datetime import datetime
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None  # type: ignore[misc, assignment]
+
+
+def get_time(timezone: str = "") -> str:
+    """
+    获取当前日期和时间，可用于回答「今天几号」「现在几点」或为搜索补充时间上下文。
+
+    参数:
+        timezone: 时区名称，如 "Asia/Shanghai"、"UTC"、"America/New_York"；空则使用本机本地时间
+
+    返回:
+        格式化的日期时间字符串（含星期）。
+    """
+    try:
+        if (timezone or "").strip():
+            if ZoneInfo is None:
+                return "错误：获取指定时区需要 Python 3.9+ 的 zoneinfo，当前使用本机时间。"
+            tz = ZoneInfo(timezone.strip())
+            now = datetime.now(tz)
+            tz_label = timezone.strip()
+        else:
+            now = datetime.now()
+            tz_label = "本机"
+        weekday = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")[now.weekday()]
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M:%S")
+        return f"当前时间（{tz_label}）\n日期: {date_str} {weekday}\n时间: {time_str}"
+    except Exception as e:
+        return f"错误：获取时间失败 - {e}"
 
 
 def web_search(query: str, max_results: int = 5) -> str:

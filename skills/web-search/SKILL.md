@@ -1,7 +1,17 @@
 ---
 name: web-search
-description: "在网页上搜索信息，返回标题、摘要和链接"
+description: "在网页上搜索信息、获取当前日期时间，返回标题、摘要和链接"
 tools:
+  - name: get_time
+    function: get_time
+    parameters:
+      type: object
+      properties:
+        timezone:
+          type: string
+          description: "时区名称，如 Asia/Shanghai、UTC；空则使用本机本地时间"
+      required: []
+
   - name: web_search
     function: web_search
     parameters:
@@ -19,9 +29,29 @@ tools:
 
 # 🔍 网页搜索技能 (web-search)
 
-在互联网上搜索信息，返回与关键词相关的网页标题、摘要和链接，供 Agent 归纳后回答用户。
+在互联网上搜索信息，返回与关键词相关的网页标题、摘要和链接；可获取当前日期时间，供回答「今天几号」「现在几点」或为搜索补充时间上下文。
 
 ## 工具一览
+
+### `get_time` — 获取当前日期时间
+
+返回当前日期、时间和星期（可指定时区）。
+
+**何时使用：** 用户问「今天几号」「现在几点」「今年是哪年」；或在做网页搜索前需要先确认当前日期/时间以缩小范围、避免过期信息时。
+
+**参数说明：**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `timezone` | string | ❌ | 时区名，如 `Asia/Shanghai`、`UTC`、`America/New_York`；不传则使用本机本地时间 |
+
+**调用示例：**
+```
+get_time()
+get_time(timezone="Asia/Shanghai")
+get_time(timezone="UTC")
+```
+
+---
 
 ### `web_search` — 网页搜索
 
