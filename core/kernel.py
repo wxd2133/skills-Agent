@@ -21,7 +21,7 @@ from core.handlers import AgentEventHandler
 from core.llm import chat
 from core.skills import (
     Skill, ToolSpec,
-    build_tool_registry, load_all_skills,
+    build_tool_registry, load_all_skills, load_skill_from_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,9 @@ class ReActKernel:
         # 构建系统提示词（含工具 Schema + 技能操作手册）
         self._system_prompt = _build_system_prompt(skills)
 
+        # 注册系统工具（如 load_new_skill），供 Agent 自我升级后加载新技能
+        self._register_system_tools()
+
         # 对话历史（仅 user/assistant，不含 system；每轮用 system + history 构建消息）
         self.history: list[dict[str, Any]] = []
         self.max_steps = Config.MAX_REACT_STEPS
@@ -167,19 +170,66 @@ class ReActKernel:
         self.handler.on_status("对话已重置")
 
     def get_skill_summary(self) -> str:
-        """返回当前已加载技能和工具的摘要。"""
-        lines = ["已加载技能:"]
-        for skill in self.skills:
-            lines.append(f"  📦 {skill.name} - {skill.description}")
-            for tool in skill.tools:
-                lines.append(f"     🔧 {tool.name}: {tool.description}")
+        """返回当前已加载技能和工具的摘要（简洁版）。"""
         if not self.skills:
-            lines.append("  （暂无技能）")
+            return "已加载技能：无"
+        n_tools = len(self.tool_registry)
+        lines = [f"已加载 {len(self.skills)} 个技能，共 {n_tools} 个工具："]
+        for skill in self.skills:
+            lines.append(f"  • {skill.name}（{len(skill.tools)} 个工具）")
         return "\n".join(lines)
 
     def get_prompt_snippet(self) -> str:
         """生成注入到 System Prompt 的技能列表摘要（供外部查看）。"""
         return _get_prompt_snippet(self.skills)
+
+    def add_skill(self, skill: Skill) -> None:
+        """
+        动态添加一个技能到当前会话（合并到 skills 与 tool_registry，并刷新系统提示词）。
+        用于 save_skill 保存后通过 load_new_skill 立即生效。
+        """
+        if any(s.name == skill.name for s in self.skills):
+            logger.warning("技能 '%s' 已存在，将覆盖", skill.name)
+            self.skills = [s for s in self.skills if s.name != skill.name]
+        self.skills.append(skill)
+        for t in skill.tools:
+            self.tool_registry[t.name] = t
+        self._system_prompt = _build_system_prompt(self.skills)
+        logger.info("已动态加载技能: %s (%d 个工具)", skill.name, len(skill.tools))
+
+    def _register_system_tools(self) -> None:
+        """注册由 Kernel 提供的系统工具（如 load_new_skill）。"""
+        load_new_skill_spec = ToolSpec(
+            name="load_new_skill",
+            description="加载刚保存的新技能，使其在本会话中立即可用。保存技能后调用此工具。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "技能目录名，与 save_skill 时使用的 name 一致"},
+                },
+                "required": ["name"],
+            },
+            execute_fn=self._load_new_skill_impl,
+        )
+        self.tool_registry["load_new_skill"] = load_new_skill_spec
+
+    def _load_new_skill_impl(self, name: str) -> str:
+        """系统工具 load_new_skill 的实现：从 USER_SKILLS_DIR 加载并加入当前会话。"""
+        name = (name or "").strip()
+        if not name:
+            return "错误：未指定技能名称。"
+        skill_dir = Config.USER_SKILLS_DIR / name
+        if not skill_dir.exists() or not skill_dir.is_dir():
+            return f"错误：未找到技能目录 {skill_dir}，请先使用 save_skill 保存。"
+        try:
+            skill = load_skill_from_dir(skill_dir)
+            if skill is None:
+                return f"错误：加载失败，请确认 {skill_dir} 下存在 SKILL.md 与 tool.py。"
+            self.add_skill(skill)
+            return f"已加载技能「{skill.name}」，共 {len(skill.tools)} 个工具。可在本会话中直接使用。"
+        except Exception as e:
+            logger.exception("加载新技能失败: %s", name)
+            return f"加载失败: {e}"
 
     # ---------- 内部方法 ----------
 

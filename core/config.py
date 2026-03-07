@@ -33,6 +33,8 @@ class Config:
     # --- 路径相关 ---
     SKILLS_DIR: Path = PROJECT_ROOT / "skills"
     WORKSPACE_DIR: Path = PROJECT_ROOT / os.getenv("WORKSPACE_DIR", "workspace")
+    # Agent 自我升级时保存新技能的目录（skills/user/），与内置技能隔离
+    USER_SKILLS_DIR: Path = SKILLS_DIR / "user"
 
     @classmethod
     def validate(cls) -> list[str]:
@@ -57,5 +59,6 @@ class Config:
             f"最大推理步数: {cls.MAX_REACT_STEPS}\n"
             f"观察展示长度: {cls.OBSERVATION_DISPLAY_MAX_LENGTH} 字符（0=不截断）\n"
             f"技能目录: {cls.SKILLS_DIR}\n"
+            f"用户技能目录: {cls.USER_SKILLS_DIR}\n"
             f"工作区: {cls.WORKSPACE_DIR}"
         )

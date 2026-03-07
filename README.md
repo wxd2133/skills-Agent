@@ -27,10 +27,12 @@
 ├── skills/              # 技能插件
 │   ├── math-tools/      # 数学计算（表达式、方程、单位换算）
 │   ├── draw-tools/      # 字符绘制（表格、方框、形状、条形图）
+│   ├── learn-tools/     # 自我升级：保存新技能到 skills/user/，load_new_skill 加载
 │   ├── shell-tools/     # 命令行/文件操作（列出、读/写、搜索、删除；范围限 workspace，删除需确认）
-│   └── web-search/      # 网页搜索
-│       ├── SKILL.md     # 技能定义 + 操作手册
-│       └── tool.py      # 工具实现
+│   ├── web-search/      # 网页搜索
+│   ├── user/            # Agent 保存的新技能（learn-tools 写入，启动时自动加载）
+│   │   └── <name>/      # 每个新技能一个目录，含 SKILL.md + tool.py
+│   └── ...              # 各技能目录均含 SKILL.md + tool.py
 └── workspace/           # 沙箱工作区（shell-tools 仅在此目录内操作）
 ```
 

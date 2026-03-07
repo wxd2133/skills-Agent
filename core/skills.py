@@ -171,9 +171,22 @@ def _load_skill(skill_dir: Path) -> Skill | None:
                  manual=manual, path=skill_dir)
 
 
+def load_skill_from_dir(skill_dir: Path) -> Skill | None:
+    """
+    从指定目录加载单个技能（用于运行时动态加载）。
+
+    参数:
+        skill_dir: 技能目录，须包含 SKILL.md 与 tool.py
+
+    返回:
+        Skill 或 None
+    """
+    return _load_skill(skill_dir)
+
+
 def load_all_skills(skills_dir: Path | None = None) -> list[Skill]:
     """
-    扫描技能目录，加载全部技能插件。
+    扫描技能目录，加载全部技能插件（含 skills/user/ 下 Agent 保存的技能）。
 
     返回:
         成功加载的 Skill 列表。
@@ -190,6 +203,16 @@ def load_all_skills(skills_dir: Path | None = None) -> list[Skill]:
             skill = _load_skill(child)
             if skill:
                 skills.append(skill)
+
+    # 加载用户/Agent 保存的技能（skills/user/*）
+    user_dir = Config.USER_SKILLS_DIR
+    if user_dir.exists() and user_dir.is_dir():
+        for child in sorted(user_dir.iterdir()):
+            if child.is_dir() and not child.name.startswith("_"):
+                skill = _load_skill(child)
+                if skill:
+                    skills.append(skill)
+                    logger.info("已加载用户技能: %s", skill.name)
 
     logger.info("共加载 %d 个技能", len(skills))
     return skills
