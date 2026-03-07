@@ -1,12 +1,16 @@
 """
 网页搜索技能 - 工具实现
 使用 ddgs（原 duckduckgo_search）进行网页搜索，无需 API Key；
-提供获取当前日期时间功能。
+提供获取当前日期时间、根据 URL 获取网页内容功能。
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
+from urllib.parse import urlparse
 
 try:
     from zoneinfo import ZoneInfo
@@ -98,3 +102,42 @@ def web_search(query: str, max_results: int = 5) -> str:
         lines.append("")
 
     return "\n".join(lines).strip()
+
+
+def get_webpage(url: str, max_chars: int = 12000) -> str:
+    """
+    根据 URL 获取网页正文内容（去标签、UTF-8 解码），便于归纳或引用。
+
+    参数:
+        url: 网页 URL，须为 http 或 https
+        max_chars: 最多返回字符数，默认 12000，避免过长
+
+    返回:
+        网页文本片段或错误说明。
+    """
+    url = (url or "").strip()
+    if not url:
+        return "错误：URL 不能为空。"
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "错误：仅支持 http/https 链接。"
+    try:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; SkillAgent/1.0)"})
+        with urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+        text = raw.decode("utf-8", errors="replace")
+    except HTTPError as e:
+        return f"错误：HTTP {e.code} - {e.reason}"
+    except URLError as e:
+        return f"错误：无法访问 - {e.reason}"
+    except Exception as e:
+        return f"错误：{e}"
+
+    # 简单去标签，保留可见文本
+    text = re.sub(r"<script[^>]*>[\s\S]*?</script>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n... (已截断)"
+    return text or "（页面无正文内容）"

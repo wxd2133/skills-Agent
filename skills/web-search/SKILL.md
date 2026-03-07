@@ -1,6 +1,6 @@
 ---
 name: web-search
-description: "在网页上搜索信息、获取当前日期时间，返回标题、摘要和链接"
+description: "在网页上搜索信息、获取当前日期时间、根据 URL 获取网页内容"
 tools:
   - name: get_time
     function: get_time
@@ -25,11 +25,25 @@ tools:
           description: "返回结果数量，默认 5，建议 3-10"
       required:
         - query
+
+  - name: get_webpage
+    function: get_webpage
+    parameters:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "网页 URL，须为 http 或 https"
+        max_chars:
+          type: integer
+          description: "最多返回字符数，默认 12000"
+      required:
+        - url
 ---
 
 # 🔍 网页搜索技能 (web-search)
 
-在互联网上搜索信息，返回与关键词相关的网页标题、摘要和链接；可获取当前日期时间，供回答「今天几号」「现在几点」或为搜索补充时间上下文。
+在互联网上搜索信息，返回与关键词相关的网页标题、摘要和链接；可获取当前日期时间；可根据 URL 获取网页正文内容（去标签文本）。
 
 ## 工具一览
 
@@ -50,6 +64,27 @@ get_time()
 get_time(timezone="Asia/Shanghai")
 get_time(timezone="UTC")
 ```
+
+---
+
+### `get_webpage` — 获取网页内容
+
+根据 URL 拉取网页，去除 HTML 标签后返回正文文本片段（UTF-8），便于归纳或引用。
+
+**何时使用：** 用户给了一个链接要「打开看看」「抓取内容」「总结这个页面」；或 web_search 返回某条链接后需要进一步读取该页正文时。
+
+**参数说明：**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `url` | string | ✅ | 网页 URL，须为 http 或 https |
+| `max_chars` | integer | ❌ | 最多返回字符数，默认 12000 |
+
+**调用示例：**
+```
+get_webpage(url="https://example.com/article")
+```
+
+**注意：** 仅支持公开可访问的 http/https 链接；若页面需登录或反爬较严，可能无法获取完整内容。
 
 ---
 
