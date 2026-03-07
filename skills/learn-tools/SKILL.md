@@ -35,6 +35,13 @@ tools:
 
 Agent 可以**学会新技能并保存**：根据用户需求或已有能力，生成新技能的 SKILL.md 与 tool.py，保存到 `skills/user/` 目录；保存后调用系统工具 **load_new_skill** 即可在本会话中立即使用。下次启动时会自动加载已保存的用户技能。
 
+## 创建技能规范（必读，否则易导致工具失效）
+
+1. **技能名唯一**：`name` 不能与 `skills/user/` 下已有目录同名，否则会报错。同名会覆盖旧技能并可能引发工具冲突，请改用新名称或先删除旧目录。
+2. **工具名唯一**：同一技能内 `tools_spec` 里每个工具的 `name` 不可重复。
+3. **function 与 tool.py 一致**：`tools_spec` 中每个 `function` 必须在 `tool_py_content` 里**有对应定义**（即存在 `def 函数名(`），否则保存时会报错；未定义会导致加载时该工具失效。
+4. **先设计再保存**：确定 name、各工具 name/function/parameters、manual_content、tool_py_content 后再调用 save_skill。
+
 ## 必须遵守的流程
 
 1. **先设计再保存**：确定技能名称、要提供的工具（名称、参数 JSON Schema）、操作手册正文和 tool.py 源码。

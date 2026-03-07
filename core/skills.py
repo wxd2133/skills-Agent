@@ -199,10 +199,14 @@ def load_all_skills(skills_dir: Path | None = None) -> list[Skill]:
         return skills
 
     for child in sorted(skills_dir.iterdir()):
-        if child.is_dir() and not child.name.startswith("_"):
-            skill = _load_skill(child)
-            if skill:
-                skills.append(skill)
+        if not child.is_dir() or child.name.startswith("_"):
+            continue
+        # user 为存放用户技能的容器目录，只加载其子目录，此处跳过
+        if child.name == "user":
+            continue
+        skill = _load_skill(child)
+        if skill:
+            skills.append(skill)
 
     # 加载用户/Agent 保存的技能（skills/user/*）
     user_dir = Config.USER_SKILLS_DIR
