@@ -50,13 +50,14 @@ def git_add(repo_path: str, files: str) -> str:
     except Exception as e:
         return f"发生异常：{str(e)}"
 
-def git_commit(repo_path: str, commit_message: str) -> str:
+def git_commit(repo_path: str, commit_message: str, summarize: bool = False) -> str:
     """
-    提交更改到本地仓库。
+    提交更改到本地仓库。支持在提交消息中自动总结更改。
     
     Args:
         repo_path: git仓库的路径
         commit_message: 提交消息
+        summarize: 是否在提交消息中总结更改，默认为False
     
     Returns:
         字符串，表示提交结果或错误。
@@ -66,6 +67,17 @@ def git_commit(repo_path: str, commit_message: str) -> str:
             return f"错误：路径 '{repo_path}' 不存在或不是目录。"
         original_cwd = os.getcwd()
         os.chdir(repo_path)
+        
+        if summarize:
+            # 获取暂存区的更改总结
+            summary_result = subprocess.run(["git", "diff", "--staged", "--stat"], capture_output=True, text=True)
+            if summary_result.returncode == 0 and summary_result.stdout.strip():
+                summary = summary_result.stdout.strip()
+                commit_message = f"{commit_message}\n\n更改总结:\n{summary}"
+            else:
+                # 如果没有更改或获取失败，保持原消息
+                pass
+        
         result = subprocess.run(["git", "commit", "-m", commit_message], capture_output=True, text=True)
         os.chdir(original_cwd)
         if result.returncode == 0:

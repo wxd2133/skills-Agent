@@ -1,6 +1,6 @@
 ---
 name: git-tools
-description: 提供完整的git操作功能，包括状态检查、添加、提交、推送、拉取等
+description: 提供完整的git操作功能，包括状态检查、添加、提交、推送、拉取等，支持提交时总结更改
 tools:
 - name: git_status
   function: git_status
@@ -37,6 +37,9 @@ tools:
       commit_message:
         type: string
         description: 提交消息
+      summarize:
+        type: boolean
+        description: 是否在提交消息中总结更改，默认为false
     required:
     - repo_path
     - commit_message
@@ -77,7 +80,7 @@ tools:
 # git-tools
 
 ## 概述
-此技能提供完整的git操作功能，支持状态检查、添加文件、提交更改、推送和拉取等，帮助用户像程序员一样管理代码仓库。
+此技能提供完整的git操作功能，支持状态检查、添加文件、提交更改、推送和拉取等，帮助用户像程序员一样管理代码仓库。升级后，提交工具可自动总结更改并写入commit信息。
 
 ## 工具
 
@@ -113,20 +116,21 @@ git_add(repo_path="/path/to/repo", files=".")
 **返回：** 字符串，表示添加结果或错误。
 
 ### `git_commit` — 提交更改到本地仓库
-提交暂存区的更改到本地仓库。
+提交暂存区的更改到本地仓库。支持在提交消息中自动总结更改。
 
 **参数说明：**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `repo_path` | string | ✅ | git仓库的路径 |
 | `commit_message` | string | ✅ | 提交消息 |
+| `summarize` | boolean | ❌ | 是否在提交消息中总结更改，默认为false |
 
 **调用示例：**
 ```
-git_commit(repo_path="/path/to/repo", commit_message="Fix bug")
+git_commit(repo_path="/path/to/repo", commit_message="Fix bug", summarize=true)
 ```
 
-**返回：** 字符串，表示提交结果或错误。
+**返回：** 字符串，表示提交结果或错误。当summarize为true时，提交消息会包含更改总结。
 
 ### `git_push` — 推送提交到远程仓库
 将本地提交推送到远程仓库。
