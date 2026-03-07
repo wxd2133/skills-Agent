@@ -12,6 +12,19 @@ tools:
         description: git仓库的路径
     required:
     - repo_path
+- name: git_diff
+  function: git_diff
+  parameters:
+    type: object
+    properties:
+      repo_path:
+        type: string
+        description: git仓库的路径
+      staged:
+        type: boolean
+        description: true=暂存区diff(默认)，false=工作区diff
+    required:
+    - repo_path
 - name: git_add
   function: git_add
   parameters:
@@ -82,14 +95,23 @@ tools:
 # git-tools
 
 ## 概述
-此技能提供完整的 git 操作功能，支持状态检查、添加文件、提交更改、推送和拉取等。
+此技能提供完整的 git 操作功能，支持查看 diff、状态检查、添加、提交、推送和拉取等。
+
+## 推荐提交流程（先读 diff 再总结再提交）
+1. **git_add** 将修改加入暂存区。
+2. **git_diff(repo_path, staged=True)** 获取暂存区完整 diff，阅读修改内容。
+3. **根据 diff 内容思考**，总结「改了什么」写成一句提交信息（不要用「2 files changed」这类统计，要写具体改动）。
+4. **git_commit(commit_message="你的总结")** 提交。
+5. **git_push** 推送。
+
+`auto_message` 仅作兜底（会列出涉及文件），建议以 git_diff + 手写 commit_message 为主。
 
 ## 安全与限制
 - **路径限制**：所有操作的 `repo_path` 必须在**当前项目根目录内**（SkillAgent 及其子目录），不能操作项目外的路径，否则会返回错误。
 
 ## 工具
 
-### `git_status` — 检查git仓库状态
+### `git_status` — 检查 git 仓库状态
 显示工作目录和暂存区的状态。
 
 **参数说明：**
@@ -103,6 +125,17 @@ git_status(repo_path="/path/to/repo")
 ```
 
 **返回：** 字符串，显示状态信息或错误。
+
+### `git_diff` — 获取 diff 内容（供撰写提交信息）
+返回暂存区或工作区的完整 diff 文本，供阅读后撰写有意义的提交信息。**提交前应先调用此工具查看修改内容，再根据内容写 commit_message。**
+
+**参数说明：**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `repo_path` | string | ✅ | git 仓库的路径 |
+| `staged` | boolean | ❌ | true=暂存区 diff（默认），false=工作区 diff |
+
+**返回：** diff 全文；无差异时返回提示。
 
 ### `git_add` — 添加文件到暂存区
 将文件更改添加到暂存区。

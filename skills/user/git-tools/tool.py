@@ -51,6 +51,36 @@ def git_status(repo_path: str) -> str:
         return f"发生异常：{str(e)}"
 
 
+def git_diff(repo_path: str, staged: bool = True) -> str:
+    """
+    获取工作区或暂存区的 diff 内容，供阅读后撰写提交信息。
+    推荐流程：先 git_diff → 根据修改内容思考总结 → 再 git_commit(commit_message=...)。
+    repo_path 须在项目根目录内。
+    """
+    res = _resolve_repo_path(repo_path)
+    if isinstance(res, str):
+        return res
+    try:
+        args = ["git", "diff", "--staged"] if staged else ["git", "diff"]
+        r = subprocess.run(
+            args,
+            cwd=str(res),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        out = (r.stdout or "").strip()
+        if r.returncode != 0:
+            return f"获取 diff 失败：{r.stderr}"
+        if not out:
+            return "（暂存区无差异，请先 git_add 或检查工作区修改）" if staged else "（工作区无差异）"
+        return out
+    except subprocess.TimeoutExpired:
+        return "错误：执行超时。"
+    except Exception as e:
+        return f"发生异常：{str(e)}"
+
+
 def git_add(repo_path: str, files: str) -> str:
     """
     添加文件到暂存区。
@@ -104,8 +134,21 @@ def git_commit(
         if r.returncode == 0 and (r.stdout or "").strip():
             summary = r.stdout.strip()
         if auto_message and summary != "无更改或获取失败":
-            first_line = summary.split("\n")[0].strip()
-            commit_message = first_line or "自动提交：更改总结"
+            # 仅作兜底：列出涉及的文件，便于 Agent 结合 git_diff 再提交
+            r_names = subprocess.run(
+                ["git", "diff", "--staged", "--name-only"],
+                cwd=str(res),
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if r_names.returncode == 0 and (r_names.stdout or "").strip():
+                files_line = ", ".join(r_names.stdout.strip().split("\n")[:10])
+                if len((r_names.stdout or "").split("\n")) > 10:
+                    files_line += ", ..."
+                commit_message = f"更新：{files_line}"
+            else:
+                commit_message = summary.split("\n")[0].strip() or "自动提交：更改总结"
         if summarize and summary != "无更改或获取失败":
             commit_message = f"{commit_message}\n\n详细更改总结:\n{summary}"
         if not (commit_message or "").strip():

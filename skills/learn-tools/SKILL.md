@@ -23,6 +23,9 @@ tools:
         tool_py_content:
           type: string
           description: "tool.py 的完整 Python 源码"
+        overwrite:
+          type: boolean
+          description: "为 true 时允许覆盖已存在的同名技能（升级技能）"
       required:
         - name
         - description
@@ -37,7 +40,7 @@ Agent 可以**学会新技能并保存**：根据用户需求或已有能力，�
 
 ## 创建技能规范（必读，否则易导致工具失效）
 
-1. **技能名唯一**：`name` 不能与 `skills/user/` 下已有目录同名，否则会报错。同名会覆盖旧技能并可能引发工具冲突，请改用新名称或先删除旧目录。
+1. **技能名唯一**：默认不能与 `skills/user/` 下已有目录同名。**升级已有技能**时设置 `overwrite=True` 可覆盖保存（如升级 git-tools）。
 2. **工具名唯一**：同一技能内 `tools_spec` 里每个工具的 `name` 不可重复。
 3. **function 与 tool.py 一致**：`tools_spec` 中每个 `function` 必须在 `tool_py_content` 里**有对应定义**（即存在 `def 函数名(`），否则保存时会报错；未定义会导致加载时该工具失效。
 4. **先设计再保存**：确定 name、各工具 name/function/parameters、manual_content、tool_py_content 后再调用 save_skill。
@@ -64,6 +67,7 @@ Agent 可以**学会新技能并保存**：根据用户需求或已有能力，�
 | `tools_spec` | string | ✅ | JSON 数组，每项：`{"name":"工具名","function":"函数名","parameters":{...}, "needs_confirmation":false}` |
 | `manual_content` | string | ✅ | SKILL.md 的 Markdown 正文（不含 ---YAML---） |
 | `tool_py_content` | string | ✅ | tool.py 的完整 Python 源码，须包含 tools_spec 中声明的函数 |
+| `overwrite` | boolean | ❌ | 为 true 时覆盖已存在的同名技能（用于升级） |
 
 **parameters 格式**：与其它技能 SKILL.md 一致，如 `{"type":"object","properties":{"x":{"type":"string","description":"..."}},"required":["x"]}`。
 

@@ -22,6 +22,7 @@ def save_skill(
     tools_spec: str,
     manual_content: str,
     tool_py_content: str,
+    overwrite: bool = False,
 ) -> str:
     """
     将新技能保存到 skills/user/<name>/（SKILL.md + tool.py）。
@@ -33,6 +34,7 @@ def save_skill(
         tools_spec: JSON 数组，每项为 {"name":"工具名","function":"函数名","parameters":{...},"needs_confirmation":false}
         manual_content: SKILL.md 的 Markdown 正文（不含 YAML frontmatter）
         tool_py_content: tool.py 的完整 Python 源码
+        overwrite: 为 True 时允许覆盖已存在的同名技能（用于升级技能）
 
     返回:
         成功或错误信息。
@@ -43,12 +45,11 @@ def save_skill(
     if not re.match(r"^[a-zA-Z0-9_-]+$", name):
         return "错误：技能名称仅允许英文、数字、连字符和下划线。"
 
-    # 禁止覆盖：同名技能已存在会与现有工具冲突，导致失效
     out_dir = USER_SKILLS_DIR / name
-    if out_dir.exists() and (out_dir / "SKILL.md").exists():
+    if out_dir.exists() and (out_dir / "SKILL.md").exists() and not overwrite:
         return (
             f"错误：已存在同名技能「{name}」。"
-            "请改用新名称保存，或先删除旧技能目录 skills/user/" + name + " 后再保存。"
+            "请改用新名称保存、先删除旧目录后再保存，或设置 overwrite=True 覆盖升级。"
         )
 
     try:
