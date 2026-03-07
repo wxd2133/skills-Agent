@@ -10,6 +10,9 @@ from pathlib import Path
 # 项目根目录（SkillAgent），仅允许在此之下执行 git
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+# Windows 下 subprocess 默认用 gbk 解码，git 输出多为 UTF-8，统一指定避免 UnicodeDecodeError 与乱码
+_SUBPROCESS_KW = {"encoding": "utf-8", "errors": "replace"}
+
 
 def _resolve_repo_path(repo_path: str) -> Path | str:
     """解析并校验 repo_path 必须在项目根内。"""
@@ -43,6 +46,7 @@ def git_status(repo_path: str) -> str:
             capture_output=True,
             text=True,
             timeout=30,
+            **_SUBPROCESS_KW,
         )
         return r.stdout if r.returncode == 0 else f"状态检查失败：{r.stderr}"
     except subprocess.TimeoutExpired:
@@ -68,6 +72,7 @@ def git_diff(repo_path: str, staged: bool = True) -> str:
             capture_output=True,
             text=True,
             timeout=60,
+            **_SUBPROCESS_KW,
         )
         out = (r.stdout or "").strip()
         if r.returncode != 0:
@@ -100,6 +105,7 @@ def git_add(repo_path: str, files: str) -> str:
             capture_output=True,
             text=True,
             timeout=60,
+            **_SUBPROCESS_KW,
         )
         if r.returncode == 0:
             return f"添加成功：{files}"
@@ -130,6 +136,7 @@ def git_commit(
             capture_output=True,
             text=True,
             timeout=30,
+            **_SUBPROCESS_KW,
         )
         if r.returncode == 0 and (r.stdout or "").strip():
             summary = r.stdout.strip()
@@ -141,6 +148,7 @@ def git_commit(
                 capture_output=True,
                 text=True,
                 timeout=15,
+                **_SUBPROCESS_KW,
             )
             if r_names.returncode == 0 and (r_names.stdout or "").strip():
                 files_line = ", ".join(r_names.stdout.strip().split("\n")[:10])
@@ -161,6 +169,7 @@ def git_commit(
             capture_output=True,
             text=True,
             timeout=30,
+            **_SUBPROCESS_KW,
         )
         if r2.returncode == 0:
             return f"提交成功：{r2.stdout.strip()}"
@@ -185,6 +194,7 @@ def git_push(repo_path: str, remote: str = "origin", branch: str | None = None) 
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **_SUBPROCESS_KW,
             )
             if r.returncode != 0:
                 return f"获取当前分支失败：{r.stderr}"
@@ -195,6 +205,7 @@ def git_push(repo_path: str, remote: str = "origin", branch: str | None = None) 
             capture_output=True,
             text=True,
             timeout=120,
+            **_SUBPROCESS_KW,
         )
         return f"推送成功到 {remote}/{branch}" if r2.returncode == 0 else f"推送失败：{r2.stderr}"
     except subprocess.TimeoutExpired:
@@ -218,6 +229,7 @@ def git_pull(repo_path: str, remote: str = "origin", branch: str | None = None) 
                 capture_output=True,
                 text=True,
                 timeout=10,
+                **_SUBPROCESS_KW,
             )
             if r.returncode != 0:
                 return f"获取当前分支失败：{r.stderr}"
@@ -228,6 +240,7 @@ def git_pull(repo_path: str, remote: str = "origin", branch: str | None = None) 
             capture_output=True,
             text=True,
             timeout=120,
+            **_SUBPROCESS_KW,
         )
         return f"拉取成功从 {remote}/{branch}" if r2.returncode == 0 else f"拉取失败：{r2.stderr}"
     except subprocess.TimeoutExpired:

@@ -43,7 +43,8 @@ Agent 可以**学会新技能并保存**：根据用户需求或已有能力，�
 1. **技能名唯一**：默认不能与 `skills/user/` 下已有目录同名。**升级已有技能**时设置 `overwrite=True` 可覆盖保存（如升级 git-tools）。
 2. **工具名唯一**：同一技能内 `tools_spec` 里每个工具的 `name` 不可重复。
 3. **function 与 tool.py 一致**：`tools_spec` 中每个 `function` 必须在 `tool_py_content` 里**有对应定义**（即存在 `def 函数名(`），否则保存时会报错；未定义会导致加载时该工具失效。
-4. **先设计再保存**：确定 name、各工具 name/function/parameters、manual_content、tool_py_content 后再调用 save_skill。
+4. **编码规范**：若 tool.py 里使用 `subprocess.run(..., text=True)` 或读写文件，须**显式指定 `encoding="utf-8"`**（及可选 `errors="replace"`），否则在 Windows 下会按系统默认编码（如 gbk）解码，导致 UnicodeDecodeError 或中文乱码。
+5. **先设计再保存**：确定 name、各工具 name/function/parameters、manual_content、tool_py_content 后再调用 save_skill。
 
 ## 必须遵守的流程
 
