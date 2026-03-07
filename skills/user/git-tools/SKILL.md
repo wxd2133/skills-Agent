@@ -1,6 +1,6 @@
 ---
 name: git-tools
-description: 提供完整的git操作功能，包括状态检查、添加、提交、推送、拉取等，支持提交时总结更改
+description: 提供完整的git操作功能，包括状态检查、添加、提交、推送、拉取等，支持提交时自动生成更改总结作为消息
 tools:
 - name: git_status
   function: git_status
@@ -36,13 +36,15 @@ tools:
         description: git仓库的路径
       commit_message:
         type: string
-        description: 提交消息
+        description: 提交消息，当auto_message为true时可省略
       summarize:
         type: boolean
-        description: 是否在提交消息中总结更改，默认为false
+        description: 是否在提交消息中附加详细更改总结，默认为false
+      auto_message:
+        type: boolean
+        description: 是否自动生成提交消息作为更改的简单总结，默认为false
     required:
     - repo_path
-    - commit_message
 - name: git_push
   function: git_push
   parameters:
@@ -80,7 +82,7 @@ tools:
 # git-tools
 
 ## 概述
-此技能提供完整的git操作功能，支持状态检查、添加文件、提交更改、推送和拉取等，帮助用户像程序员一样管理代码仓库。升级后，提交工具可自动总结更改并写入commit信息。
+此技能提供完整的git操作功能，支持状态检查、添加文件、提交更改、推送和拉取等，帮助用户像程序员一样管理代码仓库。升级后，提交工具可自动生成更改的简单总结作为提交消息。
 
 ## 工具
 
@@ -116,21 +118,23 @@ git_add(repo_path="/path/to/repo", files=".")
 **返回：** 字符串，表示添加结果或错误。
 
 ### `git_commit` — 提交更改到本地仓库
-提交暂存区的更改到本地仓库。支持在提交消息中自动总结更改。
+提交暂存区的更改到本地仓库。支持自动生成提交消息作为更改的简单总结，并可选择附加详细总结。
 
 **参数说明：**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `repo_path` | string | ✅ | git仓库的路径 |
-| `commit_message` | string | ✅ | 提交消息 |
-| `summarize` | boolean | ❌ | 是否在提交消息中总结更改，默认为false |
+| `commit_message` | string | ❌ | 提交消息，当auto_message为true时可省略 |
+| `summarize` | boolean | ❌ | 是否在提交消息中附加详细更改总结，默认为false |
+| `auto_message` | boolean | ❌ | 是否自动生成提交消息作为更改的简单总结，默认为false |
 
 **调用示例：**
 ```
+git_commit(repo_path="/path/to/repo", auto_message=true)
 git_commit(repo_path="/path/to/repo", commit_message="Fix bug", summarize=true)
 ```
 
-**返回：** 字符串，表示提交结果或错误。当summarize为true时，提交消息会包含更改总结。
+**返回：** 字符串，表示提交结果或错误。当auto_message为true时，提交消息会自动基于更改生成。
 
 ### `git_push` — 推送提交到远程仓库
 将本地提交推送到远程仓库。

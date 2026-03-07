@@ -1,5 +1,6 @@
 import subprocess
 import os
+import re
 
 def git_status(repo_path: str) -> str:
     """
@@ -50,14 +51,15 @@ def git_add(repo_path: str, files: str) -> str:
     except Exception as e:
         return f"发生异常：{str(e)}"
 
-def git_commit(repo_path: str, commit_message: str, summarize: bool = False) -> str:
+def git_commit(repo_path: str, commit_message: str = "", summarize: bool = False, auto_message: bool = False) -> str:
     """
-    提交更改到本地仓库。支持在提交消息中自动总结更改。
+    提交更改到本地仓库。支持自动生成提交消息作为更改的简单总结，并可选择附加详细总结。
     
     Args:
         repo_path: git仓库的路径
-        commit_message: 提交消息
-        summarize: 是否在提交消息中总结更改，默认为False
+        commit_message: 提交消息，当auto_message为true时可省略
+        summarize: 是否在提交消息中附加详细更改总结，默认为False
+        auto_message: 是否自动生成提交消息作为更改的简单总结，默认为False
     
     Returns:
         字符串，表示提交结果或错误。
@@ -68,15 +70,32 @@ def git_commit(repo_path: str, commit_message: str, summarize: bool = False) -> 
         original_cwd = os.getcwd()
         os.chdir(repo_path)
         
-        if summarize:
-            # 获取暂存区的更改总结
-            summary_result = subprocess.run(["git", "diff", "--staged", "--stat"], capture_output=True, text=True)
-            if summary_result.returncode == 0 and summary_result.stdout.strip():
-                summary = summary_result.stdout.strip()
-                commit_message = f"{commit_message}\n\n更改总结:\n{summary}"
+        # 获取暂存区的更改统计
+        summary_result = subprocess.run(["git", "diff", "--staged", "--stat"], capture_output=True, text=True)
+        if summary_result.returncode != 0 or not summary_result.stdout.strip():
+            summary = "无更改或获取失败"
+        else:
+            summary = summary_result.stdout.strip()
+        
+        # 自动生成提交消息
+        if auto_message:
+            # 从summary中提取简单总结，例如文件数和行数变化
+            lines = summary.split('\n')
+            if len(lines) > 0:
+                # 通常第一行是总结，如 "2 files changed, 23 insertions(+), 7 deletions(-)"
+                simple_summary = lines[0]
+                commit_message = simple_summary
             else:
-                # 如果没有更改或获取失败，保持原消息
-                pass
+                commit_message = "自动提交：更改总结"
+        
+        # 附加详细总结
+        if summarize:
+            if summary != "无更改或获取失败":
+                commit_message = f"{commit_message}\n\n详细更改总结:\n{summary}"
+        
+        # 如果commit_message为空，使用默认
+        if not commit_message.strip():
+            commit_message = "提交更改"
         
         result = subprocess.run(["git", "commit", "-m", commit_message], capture_output=True, text=True)
         os.chdir(original_cwd)
