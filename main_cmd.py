@@ -27,16 +27,29 @@ class CmdHandler(PrintHandler):
     """CLI 用处理器：危险操作确认使用 Rich 输出与输入，确保在 CMD 下可见。"""
 
     def confirm_dangerous(self, step: int, tool_name: str, tool_args: dict) -> bool:
-        from rich.prompt import Confirm
         path = tool_args.get("path", "")
-        msg = f"即将执行: [bold red]{tool_name}[/bold red] 参数: {tool_args}"
-        if path:
-            msg = f"即将删除: [bold yellow]{path}[/bold yellow]（工作区内）"
+        repo_path = tool_args.get("repo_path", "")
         console.print()
+        console.print("[bold red]⚠️  危险操作，需确认[/bold red]")
+        if tool_name == "delete_path" and path:
+            console.print(f"即将删除（工作区内）: [yellow]{path}[/yellow]")
+        elif tool_name == "git_push":
+            console.print(f"即将推送到远程: [yellow]repo_path={repo_path or '.'}[/yellow]")
+        else:
+            console.print(f"工具: [yellow]{tool_name}[/yellow]  参数: {tool_args}")
         try:
-            return Confirm.ask("是否确认?", default=False, console=console)
-        except (EOFError, KeyboardInterrupt):
-            return False
+            from rich.prompt import Confirm
+            ok = Confirm.ask("是否确认执行?", default=False, console=console)
+            return ok
+        except (EOFError, KeyboardInterrupt, Exception):
+            # 无 TTY 或 Rich 异常时回退到标准 input
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                ans = input("是否确认? (y/n): ").strip().lower()
+                return ans in ("y", "yes", "是")
+            except (EOFError, KeyboardInterrupt):
+                return False
 
 
 def print_banner() -> None:

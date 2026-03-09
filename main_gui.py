@@ -10,6 +10,7 @@ Skill Agent - GUI 图形界面入口
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, ttk
@@ -52,6 +53,25 @@ class GuiHandler(AgentEventHandler):
         display = result if max_len <= 0 or len(result) <= max_len else result[:max_len] + "\n... (已截断)"
         self._append(f"👁️ [步骤 {step}] 结果 ({tool_name}):\n   {display}", "observation")
 
+    def confirm_dangerous(self, step: int, tool_name: str, tool_args: dict[str, Any]) -> bool:
+        """危险操作：在主线程弹出确认框，工作线程阻塞等待用户选择。"""
+        self.app._confirm_request_queue.put((step, tool_name, tool_args))
+        self.app.root.after(0, self._show_confirm_dialog)
+        try:
+            return self.app._confirm_result_queue.get(timeout=300)
+        except queue.Empty:
+            return False
+
+    def _show_confirm_dialog(self) -> None:
+        """主线程执行：弹出确认框并将结果放入队列。"""
+        try:
+            step, tool_name, tool_args = self.app._confirm_request_queue.get_nowait()
+        except queue.Empty:
+            return
+        msg = f"是否执行以下危险操作？\n\n工具: {tool_name}\n参数: {tool_args}"
+        ok = messagebox.askyesno("危险操作确认", msg, icon=messagebox.WARNING)
+        self.app._confirm_result_queue.put(ok)
+
     def on_answer(self, answer: str) -> None:
         self._append(f"\n✅ Agent:\n{answer}\n", "answer")
         self.app.root.after(0, self.app._set_idle)
@@ -87,6 +107,8 @@ class SkillAgentApp:
         self.root.configure(bg=self.bg_color)
 
         self._build_ui()
+        self._confirm_request_queue: queue.Queue = queue.Queue()
+        self._confirm_result_queue: queue.Queue = queue.Queue()
         self._init_engine()
 
     def _build_ui(self) -> None:
