@@ -117,7 +117,7 @@ class ReActKernel:
         self.skills = skills
         self.tool_registry: dict[str, ToolSpec] = build_tool_registry(skills)
 
-        # 构建系统提示词（含工具 Schema + 技能操作手册）
+        # 构建系统提示词（技能摘要；完整手册由 view_skill 按需加载）
         self._system_prompt = _build_system_prompt(skills)
 
         # 注册系统工具（如 load_new_skill），供 Agent 自我升级后加载新技能
@@ -246,7 +246,13 @@ class ReActKernel:
         for skill in self.skills:
             tool_names = [t.name for t in skill.tools]
             lines.append(f"  • {skill.name}: {', '.join(tool_names)}")
-        lines.append(f"\n共 {len(self.skills)} 个技能，{len(self.tool_registry)} 个工具。")
+
+        skill_tool_names = {t.name for s in self.skills for t in s.tools}
+        system_tools = [n for n in self.tool_registry if n not in skill_tool_names]
+        if system_tools:
+            lines.append(f"  • [系统工具]: {', '.join(system_tools)}")
+
+        lines.append(f"\n共 {len(self.skills)} 个技能，{len(self.tool_registry)} 个工具（含系统工具）。")
         return "\n".join(lines)
 
     # ---------- 内部方法 ----------

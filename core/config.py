@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-# 项目根目录（skills_agent/）
+# 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # 加载 .env 文件

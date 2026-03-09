@@ -13,7 +13,7 @@ import logging
 import queue
 import threading
 import tkinter as tk
-from tkinter import scrolledtext, messagebox, ttk
+from tkinter import scrolledtext, messagebox
 from typing import Any
 
 from core.config import Config
