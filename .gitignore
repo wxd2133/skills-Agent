@@ -24,6 +24,9 @@ env/
 workspace/*
 !workspace/.gitkeep
 
+# 持久化记忆技能的数据文件（也存于 workspace，此处防误提交到根目录）
+persistent_data.json
+
 # 系统文件
 .DS_Store
 Thumbs.db

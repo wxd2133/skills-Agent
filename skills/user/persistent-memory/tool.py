@@ -1,12 +1,22 @@
+"""
+持久化记忆技能 - 数据存放在工作区 workspace/persistent_data.json，不污染项目根目录。
+"""
+
+from __future__ import annotations
+
 import json
-import os
 from pathlib import Path
+
+from core.config import Config
+
+_DATA_FILE = Config.WORKSPACE_DIR / "persistent_data.json"
+
 
 def save_info(key: str, value: str) -> str:
     """
-    保存键值对到 persistent_data.json 文件。
+    保存键值对到工作区 persistent_data.json 文件。
     """
-    file_path = Path("persistent_data.json")
+    file_path = _DATA_FILE
     data = {}
     if file_path.exists():
         try:
@@ -16,6 +26,7 @@ def save_info(key: str, value: str) -> str:
             return f"读取现有文件时出错: {e}"
     data[key] = value
     try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return f"信息已保存: key='{key}', value='{value}'"
@@ -24,9 +35,9 @@ def save_info(key: str, value: str) -> str:
 
 def read_info(key: str) -> str:
     """
-    从 persistent_data.json 文件读取指定键的值。
+    从工作区 persistent_data.json 文件读取指定键的值。
     """
-    file_path = Path("persistent_data.json")
+    file_path = _DATA_FILE
     if not file_path.exists():
         return f"文件不存在，键 '{key}' 未找到。"
     try:
@@ -41,9 +52,9 @@ def read_info(key: str) -> str:
 
 def delete_info(key: str) -> str:
     """
-    从 persistent_data.json 文件删除指定键。
+    从工作区 persistent_data.json 文件删除指定键。
     """
-    file_path = Path("persistent_data.json")
+    file_path = _DATA_FILE
     if not file_path.exists():
         return f"文件不存在，键 '{key}' 未找到。"
     try:
