@@ -154,6 +154,10 @@ class ReActKernel:
 
                 answer, observation = self._execute_decision(decision, step + 1)
                 if answer is not None:
+                    self.history.append({
+                        "role": "assistant",
+                        "content": json.dumps(decision, ensure_ascii=False),
+                    })
                     return answer
 
                 self._append_step_to_history(decision, observation)
