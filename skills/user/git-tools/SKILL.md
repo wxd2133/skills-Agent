@@ -60,6 +60,7 @@ tools:
     - repo_path
 - name: git_push
   function: git_push
+  needs_confirmation: true
   parameters:
     type: object
     properties:
@@ -172,8 +173,8 @@ git_commit(repo_path="/path/to/repo", commit_message="Fix bug", summarize=true)
 
 **返回：** 字符串，表示提交结果或错误。当auto_message为true时，提交消息会自动基于更改生成。
 
-### `git_push` — 推送提交到远程仓库
-将本地提交推送到远程仓库。
+### `git_push` — 推送提交到远程仓库（需用户确认）
+将本地提交推送到远程仓库。**执行前会要求用户确认**，未确认则不执行。
 
 **参数说明：**
 | 参数 | 类型 | 必填 | 说明 |

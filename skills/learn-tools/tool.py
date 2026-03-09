@@ -14,6 +14,43 @@ import yaml
 from core.config import Config
 
 USER_SKILLS_DIR = Config.USER_SKILLS_DIR
+SKILLS_DIR = Config.SKILLS_DIR
+
+
+def _collect_existing_tool_names(exclude_skill_name: str | None = None) -> set[str]:
+    """
+    从磁盘上所有技能的 SKILL.md 中收集工具名（name）。
+    exclude_skill_name: 若指定，则排除该技能下的工具名（用于 overwrite 时避免与自己冲突）。
+    """
+    names: set[str] = set()
+    for base_dir in (SKILLS_DIR, USER_SKILLS_DIR):
+        if not base_dir.exists() or not base_dir.is_dir():
+            continue
+        for child in base_dir.iterdir():
+            if not child.is_dir() or child.name.startswith("_"):
+                continue
+            if base_dir == SKILLS_DIR and child.name == "user":
+                continue
+            skill_md = child / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            try:
+                raw = skill_md.read_text(encoding="utf-8", errors="replace")
+                match = re.match(r"\A---\s*\n(.*?)\n---", raw, re.DOTALL)
+                if not match:
+                    continue
+                meta = yaml.safe_load(match.group(1))
+                if not isinstance(meta, dict):
+                    continue
+                skill_name = meta.get("name") or child.name
+                if exclude_skill_name and skill_name == exclude_skill_name:
+                    continue
+                for t in meta.get("tools") or []:
+                    if isinstance(t, dict) and t.get("name"):
+                        names.add(str(t["name"]).strip())
+            except Exception:
+                continue
+    return names
 
 
 def save_skill(
@@ -86,6 +123,13 @@ def save_skill(
         tools.append(entry)
     if not tools:
         return "错误：tools_spec 中无有效工具项。"
+
+    # 工具名全局唯一：不能与已有技能中的工具名重复（overwrite 时排除本技能）
+    existing = _collect_existing_tool_names(exclude_skill_name=name if (out_dir.exists() and overwrite) else None)
+    for entry in tools:
+        tn = entry["name"]
+        if tn in existing:
+            return f"错误：工具名「{tn}」已被其他技能使用，请换名。创建前请先调用 list_available_tools 查看已有工具名。"
 
     # 校验 tool.py 中必须定义 tools_spec 里声明的每个 function，否则加载时会报错
     for entry in tools:

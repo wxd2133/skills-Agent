@@ -198,7 +198,7 @@ class ReActKernel:
         logger.info("已动态加载技能: %s (%d 个工具)", skill.name, len(skill.tools))
 
     def _register_system_tools(self) -> None:
-        """注册由 Kernel 提供的系统工具（如 load_new_skill）。"""
+        """注册由 Kernel 提供的系统工具（如 load_new_skill、list_available_tools）。"""
         load_new_skill_spec = ToolSpec(
             name="load_new_skill",
             description="加载刚保存的新技能，使其在本会话中立即可用。保存技能后调用此工具。",
@@ -212,6 +212,14 @@ class ReActKernel:
             execute_fn=self._load_new_skill_impl,
         )
         self.tool_registry["load_new_skill"] = load_new_skill_spec
+
+        list_tools_spec = ToolSpec(
+            name="list_available_tools",
+            description="列出当前已加载的所有技能及其工具名。创建新技能前必须先调用此工具，确保新工具名与已有工具名不重复。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_fn=self._list_available_tools_impl,
+        )
+        self.tool_registry["list_available_tools"] = list_tools_spec
 
     def _load_new_skill_impl(self, name: str) -> str:
         """系统工具 load_new_skill 的实现：从 USER_SKILLS_DIR 加载并加入当前会话。"""
@@ -230,6 +238,15 @@ class ReActKernel:
         except Exception as e:
             logger.exception("加载新技能失败: %s", name)
             return f"加载失败: {e}"
+
+    def _list_available_tools_impl(self) -> str:
+        """系统工具 list_available_tools 的实现：返回当前已加载技能及工具名列表。"""
+        lines = ["当前已加载技能及工具名（创建新技能时请勿与下列工具名重复）：\n"]
+        for skill in self.skills:
+            tool_names = [t.name for t in skill.tools]
+            lines.append(f"  • {skill.name}: {', '.join(tool_names)}")
+        lines.append(f"\n共 {len(self.skills)} 个技能，{len(self.tool_registry)} 个工具。")
+        return "\n".join(lines)
 
     # ---------- 内部方法 ----------
 
