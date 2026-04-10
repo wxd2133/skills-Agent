@@ -266,17 +266,61 @@ class ReActKernel:
         return [{"role": "system", "content": self._system_prompt}] + self.history
 
     def _push_invalid_decision_feedback(self, decision: dict[str, Any]) -> bool:
-        """若 state 非法则追加反馈到 history 并返回 True，否则返回 False。"""
+        """若决策结构不合法则追加反馈到 history 并返回 True，否则返回 False。"""
         state = decision.get("state", "")
-        if state in ("thinking", "view_skill", "tool_call", "answer"):
-            return False
-        self.history.append({
-            "role": "user",
-            "content": "[SYSTEM OBSERVATION]\n"
-            "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / view_skill / tool_call / answer），请重新输出。\n"
-            "[/SYSTEM OBSERVATION]",
-        })
-        return True
+        if state not in ("thinking", "view_skill", "tool_call", "answer"):
+            self.history.append({
+                "role": "user",
+                "content": "[SYSTEM OBSERVATION]\n"
+                "你的上一轮输出不是合法 JSON 或缺少有效的 state 字段（应为 thinking / view_skill / tool_call / answer），请重新输出。\n"
+                "[/SYSTEM OBSERVATION]",
+            })
+            return True
+
+        # 每种 state 做最小字段校验，防止“半合法 JSON”进入执行阶段
+        if state == "view_skill":
+            skill_name = decision.get("skill")
+            if not isinstance(skill_name, str) or not skill_name.strip():
+                self.history.append({
+                    "role": "user",
+                    "content": "[SYSTEM OBSERVATION]\n"
+                    "state=view_skill 时必须提供非空 skill 字段（技能名）。请严格按 JSON 协议重试。\n"
+                    "[/SYSTEM OBSERVATION]",
+                })
+                return True
+
+        if state == "tool_call":
+            tool_name = decision.get("tool")
+            tool_args = decision.get("args", {})
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                self.history.append({
+                    "role": "user",
+                    "content": "[SYSTEM OBSERVATION]\n"
+                    "state=tool_call 时必须提供非空 tool 字段（工具名）。请严格按 JSON 协议重试。\n"
+                    "[/SYSTEM OBSERVATION]",
+                })
+                return True
+            if not isinstance(tool_args, dict):
+                self.history.append({
+                    "role": "user",
+                    "content": "[SYSTEM OBSERVATION]\n"
+                    "state=tool_call 时 args 必须是 JSON 对象。请严格按 JSON 协议重试。\n"
+                    "[/SYSTEM OBSERVATION]",
+                })
+                return True
+
+        if state == "answer":
+            answer = decision.get("answer")
+            if not isinstance(answer, str) or not answer.strip():
+                self.history.append({
+                    "role": "user",
+                    "content": "[SYSTEM OBSERVATION]\n"
+                    "state=answer 时必须提供非空 answer 字段。请严格按 JSON 协议重试。\n"
+                    "[/SYSTEM OBSERVATION]",
+                })
+                return True
+
+        return False
 
     def _execute_decision(self, decision: dict[str, Any], step: int) -> tuple[str | None, str]:
         """

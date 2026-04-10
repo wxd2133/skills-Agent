@@ -5,6 +5,7 @@
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 
@@ -40,7 +41,12 @@ class Config:
     def validate(cls) -> list[str]:
         """校验配置，返回错误信息列表（空列表表示配置合法）。"""
         errors: list[str] = []
-        if not cls.OPENAI_API_KEY or cls.OPENAI_API_KEY.startswith("sk-your"):
+        parsed = urlparse((cls.OPENAI_BASE_URL or "").strip())
+        host = (parsed.hostname or "").lower()
+        is_local_base = host in {"localhost", "127.0.0.1"}
+
+        # 本地模型（如 Ollama）允许无 API Key；远程服务仍要求有效 key
+        if (not is_local_base) and (not cls.OPENAI_API_KEY or cls.OPENAI_API_KEY.startswith("sk-your")):
             errors.append("请在 .env 文件中设置有效的 OPENAI_API_KEY")
         if cls.MAX_REACT_STEPS < 1:
             errors.append("MAX_REACT_STEPS 必须 >= 1")
