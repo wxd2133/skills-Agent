@@ -12,11 +12,11 @@ from pathlib import Path
 
 import yaml
 
-from core.config import Config
+from core.config import Config, PROJECT_ROOT
 
 USER_SKILLS_DIR = Config.USER_SKILLS_DIR
 SKILLS_DIR = Config.SKILLS_DIR
-REQUIREMENTS_FILE = Config.PROJECT_ROOT / "requirements.txt"
+REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 
 
 def _collect_existing_tool_names(exclude_skill_name: str | None = None) -> set[str]:
@@ -119,7 +119,7 @@ def _append_requirements_and_install(new_requirements: list[str]) -> tuple[bool,
         cmd = ["python", "-m", "pip", "install"] + new_requirements
         r = subprocess.run(
             cmd,
-            cwd=str(Config.PROJECT_ROOT),
+            cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
             encoding="utf-8",
