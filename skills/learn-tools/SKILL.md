@@ -23,6 +23,13 @@ tools:
         tool_py_content:
           type: string
           description: "tool.py 的完整 Python 源码"
+        requirements:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: "可选依赖（字符串或字符串数组）。保存技能后会自动写入 requirements.txt 并尝试安装"
         overwrite:
           type: boolean
           description: "为 true 时允许覆盖已存在的同名技能（升级技能）"
@@ -50,13 +57,14 @@ Agent 可以**学会新技能并保存**：根据用户需求或已有能力，�
 3. **工具名全局唯一**：新技能中的工具名（`name`）**不能与任何已有技能中的工具名相同**，否则 save_skill 会报错。创建前务必 list_available_tools 核对。
 4. **function 与 tool.py 一致**：`tools_spec` 中每个 `function` 必须在 `tool_py_content` 里**有对应定义**（即存在 `def 函数名(`），否则保存时会报错；未定义会导致加载时该工具失效。
 5. **编码规范**：若 tool.py 里使用 `subprocess.run(..., text=True)` 或读写文件，须**显式指定 `encoding="utf-8"`**（及可选 `errors="replace"`），否则在 Windows 下会按系统默认编码（如 gbk）解码，导致 UnicodeDecodeError 或中文乱码。
-6. **执行过程注意**：tool.py 中的函数会被 Agent 在不确定时机调用，建议：子进程调用加合理 **timeout**；异常尽量捕获并返回可读错误信息，避免未处理异常导致工具报错。
+6. **依赖声明**：若新技能依赖第三方包，务必在 `requirements` 参数中声明（如 `openpyxl>=3.1.5`）。保存时会自动更新 `requirements.txt` 并执行安装；安装失败会返回错误。
+7. **执行过程注意**：tool.py 中的函数会被 Agent 在不确定时机调用，建议：子进程调用加合理 **timeout**；异常尽量捕获并返回可读错误信息，避免未处理异常导致工具报错。
 
 ## 必须遵守的流程
 
 1. **list_available_tools**：先调用此系统工具，查看已有技能与工具名。
 2. **设计**：确定技能名称、工具名（不与已有重复）、参数 Schema、操作手册正文、tool.py 源码。
-3. **保存**：调用 `save_skill`（会要求用户确认），写入 `skills/user/<name>/`。
+3. **保存并安装依赖**：调用 `save_skill`（会要求用户确认），写入 `skills/user/<name>/`，并自动处理 `requirements`。
 4. **加载**：保存成功后**必须**调用 **load_new_skill(name="...")**，新技能才会在本会话中可用。
 
 ## 工具一览
@@ -75,6 +83,7 @@ Agent 可以**学会新技能并保存**：根据用户需求或已有能力，�
 | `tools_spec` | string | ✅ | JSON 数组，每项：`{"name":"工具名","function":"函数名","parameters":{...}, "needs_confirmation":false}` |
 | `manual_content` | string | ✅ | SKILL.md 的 Markdown 正文（不含 ---YAML---） |
 | `tool_py_content` | string | ✅ | tool.py 的完整 Python 源码，须包含 tools_spec 中声明的函数 |
+| `requirements` | string / string[] | ❌ | 技能依赖列表；保存时自动写入 `requirements.txt` 并执行安装 |
 | `overwrite` | boolean | ❌ | 为 true 时覆盖已存在的同名技能（用于升级） |
 
 **parameters 格式**：与其它技能 SKILL.md 一致，如 `{"type":"object","properties":{"x":{"type":"string","description":"..."}},"required":["x"]}`。
@@ -86,7 +95,8 @@ save_skill(
   description="根据名字打招呼",
   tools_spec='[{"name":"greet","function":"greet","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]',
   manual_content="# greet\n\n调用 greet(name) 返回问候语。",
-  tool_py_content="def greet(name: str) -> str:\n    return f\"Hello, {name}!\""
+  tool_py_content="def greet(name: str) -> str:\n    return f\"Hello, {name}!\"",
+  requirements=[]
 )
 ```
 保存成功后，**务必**再调用 **load_new_skill(name="greet")**。
