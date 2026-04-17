@@ -138,7 +138,11 @@ def _load_skill(skill_dir: Path) -> Skill | None:
         return None
 
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    try:
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    except Exception as exc:
+        logger.error("加载技能 '%s' 失败（导入 tool.py 异常）: %s", skill_name, exc)
+        return None
 
     # ---- 解析工具列表 ----
     tools: list[ToolSpec] = []
