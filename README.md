@@ -126,7 +126,6 @@ def my_tool(query: str) -> str:
 | pyyaml | 解析 SKILL.md Frontmatter |
 | rich | 终端美化（CLI） |
 | tabulate | 表格绘制（draw-tools） |
-| ddgs | 网页搜索（web-search，无需 API Key） |
 | sympy | 数学技能中的方程求解（math-tools） |
 | tzdata | Windows 上的 IANA 时区数据（web-search 的 get_time） |
 

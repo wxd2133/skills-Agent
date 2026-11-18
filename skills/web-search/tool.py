@@ -1,20 +1,19 @@
 """
 网页搜索技能 - 工具实现
-使用 ddgs（原 duckduckgo_search）进行网页搜索，无需 API Key；
+面向国内网络：优先必应中国、百度，再用 360 搜索兜底。
 提供获取当前日期时间、根据 URL 获取网页内容功能。
 """
 
 from __future__ import annotations
 
+import html
 import ipaddress
 import re
 import socket
-import threading
-import time
 from datetime import datetime
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.error import URLError, HTTPError
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 try:
     from zoneinfo import ZoneInfo
@@ -53,9 +52,112 @@ def get_time(timezone: str = "") -> str:
         return f"错误：获取时间失败 - {e}.{hint}"
 
 
+_SEARCH_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
+_SEARCH_SOURCES = (
+    ("必应", "_search_bing"),
+    ("百度", "_search_baidu"),
+    ("360搜索", "_search_360"),
+)
+
+
+def _plain_text(fragment: str) -> str:
+    """去掉标签并还原 HTML 实体。"""
+    text = re.sub(r"<[^>]+>", "", fragment or "")
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _fetch_search_html(url: str, timeout: int = 8) -> tuple[str, str]:
+    """请求固定的公网搜索地址，返回最终 URL 和 HTML。"""
+    req = Request(
+        url,
+        headers={
+            "User-Agent": _SEARCH_UA,
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        },
+    )
+    with urlopen(req, timeout=timeout) as resp:
+        final_url = resp.geturl()
+        raw = resp.read(400_000)
+    return final_url, raw.decode("utf-8", errors="replace")
+
+
+def _search_bing(query: str, max_results: int) -> list[dict[str, str]]:
+    """必应中国。国内一般可直接打开，结果在 li.b_algo 里。"""
+    url = "https://cn.bing.com/search?" + urlencode({"q": query, "ensearch": "0", "setlang": "zh-Hans"})
+    _, page = _fetch_search_html(url)
+    results: list[dict[str, str]] = []
+    for block in re.findall(r'<li class="b_algo".*?</li>', page, flags=re.S):
+        link = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', block, flags=re.S)
+        if not link:
+            continue
+        href = html.unescape(link.group(1)).strip()
+        if "bing.com/aclick" in href:
+            continue
+        snippet = re.search(r"<p[^>]*>(.*?)</p>", block, flags=re.S)
+        title = _plain_text(link.group(2))
+        if not title:
+            continue
+        results.append({
+            "title": title,
+            "body": _plain_text(snippet.group(1)) if snippet else "",
+            "href": href,
+        })
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _search_baidu(query: str, max_results: int) -> list[dict[str, str]]:
+    """百度网页搜索。遇到安全验证页时放弃，交给下一个来源。"""
+    url = "https://www.baidu.com/s?" + urlencode({"wd": query, "ie": "utf-8", "rn": str(max_results)})
+    final_url, page = _fetch_search_html(url)
+    if "百度安全验证" in page or "wappass.baidu.com" in final_url:
+        raise RuntimeError("百度返回了安全验证页")
+    results: list[dict[str, str]] = []
+    for block in re.findall(r'<h3[^>]*class="[^"]*\bt\b[^"]*"[^>]*>.*?</h3>', page, flags=re.S):
+        link = re.search(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', block, flags=re.S)
+        if not link:
+            continue
+        title = _plain_text(link.group(2))
+        href = html.unescape(link.group(1)).strip()
+        if not title or not href.startswith("http"):
+            continue
+        results.append({"title": title, "body": "", "href": href})
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _search_360(query: str, max_results: int) -> list[dict[str, str]]:
+    """360 搜索。优先用 data-mdurl 里的真实链接。"""
+    url = "https://www.so.com/s?" + urlencode({"q": query})
+    _, page = _fetch_search_html(url)
+    results: list[dict[str, str]] = []
+    pattern = re.compile(
+        r'<h3[^>]*class="[^"]*res-title[^"]*"[^>]*>\s*<a\s+([^>]+)>(.*?)</a>',
+        re.S,
+    )
+    for attrs, title_html in pattern.findall(page):
+        real = re.search(r'data-mdurl="([^"]+)"', attrs)
+        href_match = re.search(r'href="([^"]+)"', attrs)
+        href = html.unescape((real or href_match).group(1)).strip() if (real or href_match) else ""
+        title = _plain_text(title_html)
+        if not title or not href.startswith("http"):
+            continue
+        results.append({"title": title, "body": "", "href": href})
+        if len(results) >= max_results:
+            break
+    return results
+
+
 def web_search(query: str, max_results: int = 5) -> str:
     """
     在网页上搜索信息，返回标题、摘要和链接。
+    顺序为必应中国、百度、360 搜索，某个来源有结果就停止。
 
     参数:
         query:        搜索关键词或问句
@@ -64,71 +166,47 @@ def web_search(query: str, max_results: int = 5) -> str:
     返回:
         格式化的搜索结果文本；失败时返回错误说明。
     """
-    try:
-        from ddgs import DDGS
-    except ImportError:
-        return (
-            "错误：未安装网页搜索依赖。请执行 pip install ddgs 后重试。"
-        )
-
     query = (query or "").strip()
     if not query:
         return "错误：搜索关键词不能为空。"
 
     max_results = max(1, min(int(max_results), 15))
-    results: list = []
-    last_error: Exception | None = None
-    # 单个引擎超时短一些，整次搜索还有总预算，避免一个工具调用拖住整轮推理
-    per_backend_timeout = 6
-    total_budget_seconds = 16
-    started = time.monotonic()
+    errors: list[str] = []
+    found: list[dict[str, str]] = []
+    source_name = ""
+    searchers = {
+        "必应": _search_bing,
+        "百度": _search_baidu,
+        "360搜索": _search_360,
+    }
 
-    for backend in ("duckduckgo", "bing", "brave"):
-        remaining = total_budget_seconds - (time.monotonic() - started)
-        if remaining < 1:
-            last_error = TimeoutError("搜索总时间已用完")
-            break
-        timeout = max(1, min(per_backend_timeout, int(remaining)))
-        box: dict = {}
-
-        def _run(backend: str = backend, timeout: int = timeout) -> None:
-            try:
-                ddgs = DDGS(timeout=timeout)
-                found = ddgs.text(query, max_results=max_results, backend=backend) or []
-                box["results"] = list(found)
-            except Exception as exc:
-                box["error"] = exc
-
-        worker = threading.Thread(target=_run, daemon=True)
-        worker.start()
-        worker.join(timeout + 1)
-        if worker.is_alive():
-            last_error = TimeoutError(f"{backend} 超过 {timeout} 秒")
+    for name, _ in _SEARCH_SOURCES:
+        try:
+            found = searchers[name](query, max_results)
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
             continue
-        if "error" in box:
-            last_error = box["error"]
-            continue
-        results = box.get("results") or []
-        if results:
+        if found:
+            source_name = name
             break
+        errors.append(f"{name}: 无结果")
 
-    if not results:
+    if not found:
         msg = f"未找到与「{query}」相关的网页结果，可尝试换一组关键词。"
-        if last_error:
-            msg += f"\n（最后错误: {last_error}）"
+        if errors:
+            msg += "\n（" + "；".join(errors) + "）"
         return msg
 
-    lines = [f"搜索「{query}」共 {len(results)} 条结果：\n"]
-    for i, r in enumerate(results, 1):
-        title = r.get("title", "").strip() or "(无标题)"
-        body = (r.get("body") or r.get("snippet") or "").strip() or "(无摘要)"
-        href = (r.get("href") or r.get("link") or "").strip()
-        lines.append(f"{i}. {title}")
-        lines.append(f"   {body}")
+    lines = [f"来源: {source_name}", f"搜索「{query}」共 {len(found)} 条结果：\n"]
+    for i, item in enumerate(found, 1):
+        lines.append(f"{i}. {item.get('title') or '(无标题)'}")
+        body = (item.get("body") or "").strip()
+        if body:
+            lines.append(f"   {body}")
+        href = (item.get("href") or "").strip()
         if href:
             lines.append(f"   链接: {href}")
         lines.append("")
-
     return "\n".join(lines).strip()
 
 
