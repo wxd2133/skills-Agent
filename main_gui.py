@@ -161,15 +161,19 @@ class SkillAgentApp:
         self.chat_display.tag_config("action", foreground="#6e6e73")
         self.chat_display.tag_config("observation", foreground="#424245")
         self.chat_display.tag_config("answer", foreground="#1d1d1f", font=("Consolas", 10, "bold"))
-        self.chat_display.tag_config("error", foreground="#1d1d1f")
+        self.chat_display.tag_config("error", foreground="#b42318")
         self.chat_display.tag_config("status", foreground=self.fg_secondary)
 
         # --- 输入区域 ---
         input_frame = tk.Frame(self.root, bg=self.bg_color)
         input_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-        self.input_entry = tk.Entry(
-            input_frame,
+        input_row = tk.Frame(input_frame, bg=self.bg_color)
+        input_row.pack(fill=tk.X)
+
+        self.input_entry = tk.Text(
+            input_row,
+            height=3,
             font=("Segoe UI", 11),
             bg=self.input_bg,
             fg=self.fg_color,
@@ -178,12 +182,14 @@ class SkillAgentApp:
             highlightthickness=1,
             highlightbackground=self.border_color,
             highlightcolor=self.fg_color,
+            wrap=tk.WORD,
+            undo=True,
         )
-        self.input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
-        self.input_entry.bind("<Return>", self._on_send)
+        self.input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.input_entry.bind("<Return>", self._on_input_return)
 
         self.send_btn = tk.Button(
-            input_frame,
+            input_row,
             text="发送",
             command=self._on_send,
             bg=self.accent_color,
@@ -194,7 +200,16 @@ class SkillAgentApp:
             activebackground="#424245",
             activeforeground="#ffffff",
         )
-        self.send_btn.pack(side=tk.RIGHT, padx=(8, 0))
+        self.send_btn.pack(side=tk.RIGHT, padx=(8, 0), fill=tk.Y, before=self.input_entry)
+
+        tk.Label(
+            input_frame,
+            text="Enter 发送，Shift+Enter 换行",
+            bg=self.bg_color,
+            fg=self.fg_secondary,
+            font=("Segoe UI", 8),
+            anchor="w",
+        ).pack(fill=tk.X, pady=(4, 0))
 
         # --- 状态栏 ---
         self.status_var = tk.StringVar(value="就绪")
@@ -230,13 +245,20 @@ class SkillAgentApp:
 
     # --- 事件处理 ---
 
+    def _on_input_return(self, event) -> str | None:
+        """Enter 发送；Shift+Enter 换行。"""
+        if event.state & 0x0001:
+            return None
+        self._on_send()
+        return "break"
+
     def _on_send(self, event=None) -> None:
         """发送消息。"""
-        user_input = self.input_entry.get().strip()
+        user_input = self.input_entry.get("1.0", tk.END).strip()
         if not user_input:
             return
 
-        self.input_entry.delete(0, tk.END)
+        self.input_entry.delete("1.0", tk.END)
         self._append_chat(f"🧑 你: {user_input}", "user")
 
         # 禁用输入

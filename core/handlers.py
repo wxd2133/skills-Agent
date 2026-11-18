@@ -53,9 +53,9 @@ class AgentEventHandler(ABC):
 
         返回:
             True 表示用户确认执行，False 表示取消。
-        默认实现：直接返回 True（不拦截，适用于无交互场景）。
+        默认拒绝。没有交互界面时不能静默放行删除、推送等操作。
         """
-        return True
+        return False
 
     @abstractmethod
     def on_observation(self, step: int, tool_name: str, result: str) -> None:

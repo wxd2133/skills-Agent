@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
+import threading
+import time
 from datetime import datetime
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlparse
 
@@ -43,7 +47,10 @@ def get_time(timezone: str = "") -> str:
         time_str = now.strftime("%H:%M:%S")
         return f"当前时间（{tz_label}）\n日期: {date_str} {weekday}\n时间: {time_str}"
     except Exception as e:
-        return f"错误：获取时间失败 - {e}"
+        hint = ""
+        if "No time zone found" in str(e):
+            hint = " 请安装 tzdata（pip install tzdata）后重试。"
+        return f"错误：获取时间失败 - {e}.{hint}"
 
 
 def web_search(query: str, max_results: int = 5) -> str:
@@ -71,18 +78,39 @@ def web_search(query: str, max_results: int = 5) -> str:
     max_results = max(1, min(int(max_results), 15))
     results: list = []
     last_error: Exception | None = None
+    # 单个引擎超时短一些，整次搜索还有总预算，避免一个工具调用拖住整轮推理
+    per_backend_timeout = 6
+    total_budget_seconds = 16
+    started = time.monotonic()
 
-    # 依次尝试不同 backend，避免单一引擎不可用
-    for backend in ["duckduckgo", "brave", "bing", "auto"]:
-        try:
-            ddgs = DDGS()
-            gen = ddgs.text(query, max_results=max_results, backend=backend)
-            results = list(gen) if gen else []
-            if results:
-                break
-        except Exception as exc:
-            last_error = exc
+    for backend in ("duckduckgo", "bing", "brave"):
+        remaining = total_budget_seconds - (time.monotonic() - started)
+        if remaining < 1:
+            last_error = TimeoutError("搜索总时间已用完")
+            break
+        timeout = max(1, min(per_backend_timeout, int(remaining)))
+        box: dict = {}
+
+        def _run(backend: str = backend, timeout: int = timeout) -> None:
+            try:
+                ddgs = DDGS(timeout=timeout)
+                found = ddgs.text(query, max_results=max_results, backend=backend) or []
+                box["results"] = list(found)
+            except Exception as exc:
+                box["error"] = exc
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        worker.join(timeout + 1)
+        if worker.is_alive():
+            last_error = TimeoutError(f"{backend} 超过 {timeout} 秒")
             continue
+        if "error" in box:
+            last_error = box["error"]
+            continue
+        results = box.get("results") or []
+        if results:
+            break
 
     if not results:
         msg = f"未找到与「{query}」相关的网页结果，可尝试换一组关键词。"
@@ -104,6 +132,69 @@ def web_search(query: str, max_results: int = 5) -> str:
     return "\n".join(lines).strip()
 
 
+_MAX_DOWNLOAD_BYTES = 512_000
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """本地、内网、链路本地、保留地址和组播地址都不允许抓取。"""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return _is_blocked_ip(ip.ipv4_mapped)
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _reject_unsafe_url(url: str) -> str | None:
+    """公网 http/https 返回 None，其余返回给调用方的错误说明。"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "错误：仅支持 http/https 链接。"
+    host = (parsed.hostname or "").strip().rstrip(".").lower()
+    if not host:
+        return "错误：URL 缺少主机名。"
+    if host in {"localhost", "localhost.localdomain", "metadata.google.internal"} or host.endswith(".local"):
+        return "错误：不允许访问本地或内网地址。"
+
+    literal_ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None
+    try:
+        literal_ip = ipaddress.ip_address(host)
+    except ValueError:
+        literal_ip = None
+    if literal_ip is not None and _is_blocked_ip(literal_ip):
+        return "错误：不允许访问本地或内网地址。"
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port)
+    except socket.gaierror as exc:
+        return f"错误：无法解析主机 - {exc}"
+    if not infos:
+        return "错误：无法解析主机。"
+    for info in infos:
+        try:
+            resolved = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return "错误：无法解析主机。"
+        if _is_blocked_ip(resolved):
+            return "错误：不允许访问本地或内网地址。"
+    return None
+
+
+class _SafeRedirectHandler(HTTPRedirectHandler):
+    """重定向目标也要经过同一套地址检查。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        rejected = _reject_unsafe_url(newurl)
+        if rejected:
+            raise HTTPError(req.full_url, code, rejected, headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def get_webpage(url: str, max_chars: int = 12000) -> str:
     """
     根据 URL 获取网页正文内容（去标签、UTF-8 解码），便于归纳或引用。
@@ -118,15 +209,32 @@ def get_webpage(url: str, max_chars: int = 12000) -> str:
     url = (url or "").strip()
     if not url:
         return "错误：URL 不能为空。"
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return "错误：仅支持 http/https 链接。"
+    rejected = _reject_unsafe_url(url)
+    if rejected:
+        return rejected
+    try:
+        max_chars = int(max_chars)
+    except (TypeError, ValueError):
+        max_chars = 12000
+    max_chars = max(500, min(max_chars, 20000))
+
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; SkillAgent/1.0)"})
-        with urlopen(req, timeout=15) as resp:
-            raw = resp.read()
-        text = raw.decode("utf-8", errors="replace")
+        opener = build_opener(_SafeRedirectHandler)
+        with opener.open(req, timeout=15) as resp:
+            chunks: list[bytes] = []
+            total = 0
+            while total < _MAX_DOWNLOAD_BYTES:
+                block = resp.read(min(65536, _MAX_DOWNLOAD_BYTES - total))
+                if not block:
+                    break
+                chunks.append(block)
+                total += len(block)
+        text = b"".join(chunks).decode("utf-8", errors="replace")
     except HTTPError as e:
+        reason = str(e.reason or "")
+        if reason.startswith("错误："):
+            return reason
         return f"错误：HTTP {e.code} - {e.reason}"
     except URLError as e:
         return f"错误：无法访问 - {e.reason}"

@@ -16,3 +16,6 @@ sympy>=1.12             # 符号计算
 
 # 网页搜索技能（原 duckduckgo-search 已改名为 ddgs）
 ddgs>=9.0               # 网页搜索（无需 API Key）
+
+# Windows 上 zoneinfo 需要这份 IANA 时区数据
+tzdata>=2024.1

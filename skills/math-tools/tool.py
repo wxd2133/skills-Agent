@@ -5,7 +5,87 @@
 
 from __future__ import annotations
 
+import ast
 import math
+import operator
+
+
+_BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+_MAX_EXPR_LEN = 500
+_MAX_ABS_EXPONENT = 1000
+_MAX_FACTORIAL = 1000
+
+
+def _safe_calculate(expression: str):
+    """只允许数字、白名单函数和四则运算，拒绝属性访问与任意代码。"""
+    if len(expression) > _MAX_EXPR_LEN:
+        raise ValueError(f"表达式过长（上限 {_MAX_EXPR_LEN} 字符）")
+
+    env = {
+        "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
+        "pow": pow, "int": int, "float": float,
+        "sqrt": math.sqrt, "log": math.log, "log2": math.log2, "log10": math.log10,
+        "sin": math.sin, "cos": math.cos, "tan": math.tan,
+        "asin": math.asin, "acos": math.acos, "atan": math.atan,
+        "ceil": math.ceil, "floor": math.floor,
+        "pi": math.pi, "e": math.e,
+        "factorial": math.factorial, "gcd": math.gcd,
+    }
+
+    def walk(node):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+                raise ValueError("只允许数字常量")
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id not in env:
+                raise ValueError(f"不允许的名称: {node.id}")
+            return env[node.id]
+        if isinstance(node, ast.UnaryOp):
+            op = _UNARY_OPS.get(type(node.op))
+            if op is None:
+                raise ValueError("不允许的运算符")
+            return op(walk(node.operand))
+        if isinstance(node, ast.BinOp):
+            op = _BIN_OPS.get(type(node.op))
+            if op is None:
+                raise ValueError("不允许的运算符")
+            left = walk(node.left)
+            right = walk(node.right)
+            if isinstance(node.op, ast.Pow) and isinstance(right, (int, float)) and abs(right) > _MAX_ABS_EXPONENT:
+                raise ValueError("指数过大")
+            return op(left, right)
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return [walk(item) for item in node.elts]
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name) or node.keywords:
+                raise ValueError("不允许的函数调用")
+            fn = env.get(node.func.id)
+            if not callable(fn):
+                raise ValueError(f"不允许的函数: {node.func.id}")
+            args = [walk(arg) for arg in node.args]
+            if node.func.id == "factorial":
+                if len(args) != 1 or isinstance(args[0], bool) or not isinstance(args[0], int):
+                    raise ValueError("factorial 只接受一个整数")
+                if args[0] < 0 or args[0] > _MAX_FACTORIAL:
+                    raise ValueError(f"factorial 参数需在 0 到 {_MAX_FACTORIAL} 之间")
+            return fn(*args)
+        raise ValueError("表达式包含不允许的语法")
+
+    tree = ast.parse(expression, mode="eval")
+    return walk(tree.body)
 
 
 def calculate(expression: str) -> str:
@@ -18,22 +98,8 @@ def calculate(expression: str) -> str:
     返回:
         计算结果的字符串。
     """
-    # 允许使用的安全数学函数
-    safe_globals = {"__builtins__": {}}
-    safe_locals = {
-        "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
-        "pow": pow, "int": int, "float": float,
-        # math 模块常用函数
-        "sqrt": math.sqrt, "log": math.log, "log2": math.log2, "log10": math.log10,
-        "sin": math.sin, "cos": math.cos, "tan": math.tan,
-        "asin": math.asin, "acos": math.acos, "atan": math.atan,
-        "ceil": math.ceil, "floor": math.floor,
-        "pi": math.pi, "e": math.e,
-        "factorial": math.factorial, "gcd": math.gcd,
-    }
-
     try:
-        result = eval(expression, safe_globals, safe_locals)  # noqa: S307
+        result = _safe_calculate(expression)
         return f"计算结果: {expression} = {result}"
     except Exception as exc:
         return f"计算出错: {exc}"
@@ -51,18 +117,61 @@ def solve_equation(equation: str, variable: str = "x") -> str:
         方程的解。
     """
     try:
-        from sympy import symbols, Eq, solve, sympify  # type: ignore[import-untyped]
+        from sympy import (  # type: ignore[import-untyped]
+            E, Eq, Float, Function, Integer, Rational, Symbol,
+            cos, exp, factorial, log, pi, sin, solve, sqrt, symbols, tan,
+        )
+        from sympy.parsing.sympy_parser import (  # type: ignore[import-untyped]
+            implicit_multiplication_application,
+            parse_expr,
+            standard_transformations,
+            stringify_expr,
+        )
+
+        if not variable.isidentifier():
+            return f"求解出错: 未知数名称不合法: {variable}"
 
         var = symbols(variable)
-        # 拆分等号两边
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        local_dict = {
+            "sin": sin, "cos": cos, "tan": tan,
+            "exp": exp, "log": log, "sqrt": sqrt,
+            "factorial": factorial,
+            "pi": pi, "E": E,
+        }
+        local_dict[variable] = var
+        safe_globals = {
+            "__builtins__": {},
+            "Integer": Integer, "Float": Float, "Rational": Rational,
+            "Symbol": Symbol, "Function": Function, "factorial": factorial,
+        }
+
+        def _parse(text: str):
+            code = stringify_expr(text, local_dict, safe_globals, transformations)
+            if "__" in code:
+                raise ValueError("表达式包含不允许的语法")
+            tree = ast.parse(code, mode="eval")
+            allowed = set(safe_globals) | set(local_dict)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Attribute, ast.Subscript, ast.Lambda)):
+                    raise ValueError("表达式包含不允许的语法")
+                if isinstance(node, ast.Name) and node.id not in allowed:
+                    raise ValueError(f"不允许的名称: {node.id}")
+                if isinstance(node, ast.Call) and not isinstance(node.func, ast.Name):
+                    raise ValueError("表达式包含不允许的语法")
+            return parse_expr(
+                text,
+                local_dict=local_dict,
+                global_dict=safe_globals,
+                transformations=transformations,
+            )
+
+        # 拆分等号两边。解析器只接受数学表达式，不执行任意代码。
         if "=" in equation:
             left_str, right_str = equation.split("=", 1)
-            left = sympify(left_str.strip())
-            right = sympify(right_str.strip())
-            eq = Eq(left, right)
+            eq = Eq(_parse(left_str.strip()), _parse(right_str.strip()))
         else:
-            # 如果没有等号，默认等于 0
-            eq = Eq(sympify(equation), 0)
+            eq = Eq(_parse(equation), 0)
 
         solutions = solve(eq, var)
         if not solutions:

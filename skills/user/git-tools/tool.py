@@ -15,12 +15,15 @@ _SUBPROCESS_KW = {"encoding": "utf-8", "errors": "replace"}
 
 
 def _resolve_repo_path(repo_path: str) -> Path | str:
-    """解析并校验 repo_path 必须在项目根内。"""
+    """解析并校验 repo_path 必须在项目根内。相对路径相对于项目根，不看进程工作目录。"""
     path = (repo_path or "").strip()
     if not path:
         return "错误：repo_path 不能为空。"
     try:
-        p = Path(path).resolve()
+        p = Path(path)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        p = p.resolve()
         if not p.is_dir():
             return f"错误：路径不存在或不是目录: {p}"
         p.relative_to(PROJECT_ROOT)

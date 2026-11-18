@@ -30,6 +30,8 @@ class Config:
     MAX_REACT_STEPS: int = int(os.getenv("MAX_REACT_STEPS", "10"))
     # 观察结果在界面展示时的最大字符数，0 表示不截断
     OBSERVATION_DISPLAY_MAX_LENGTH: int = int(os.getenv("OBSERVATION_DISPLAY_MAX_LENGTH", "2000"))
+    # 发给模型的对话历史上限（字符）。超出后会压缩较早的观察结果。0 表示不限制。
+    HISTORY_MAX_CHARS: int = int(os.getenv("HISTORY_MAX_CHARS", "24000"))
 
     # --- 路径相关 ---
     SKILLS_DIR: Path = PROJECT_ROOT / "skills"
@@ -64,6 +66,7 @@ class Config:
             f"最大输出长度: {cls.MAX_COMPLETION_TOKENS} tokens\n"
             f"最大推理步数: {cls.MAX_REACT_STEPS}\n"
             f"观察展示长度: {cls.OBSERVATION_DISPLAY_MAX_LENGTH} 字符（0=不截断）\n"
+            f"历史长度上限: {cls.HISTORY_MAX_CHARS} 字符（0=不限制）\n"
             f"技能目录: {cls.SKILLS_DIR}\n"
             f"用户技能目录: {cls.USER_SKILLS_DIR}\n"
             f"工作区: {cls.WORKSPACE_DIR}"

@@ -67,6 +67,7 @@ cp .env.example .env      # Linux / macOS
 | TEMPERATURE | 采样温度 | 0.7 |
 | MAX_COMPLETION_TOKENS | 单轮最大输出 token 数（防截断） | 4096 |
 | OBSERVATION_DISPLAY_MAX_LENGTH | 观察结果在界面展示的最大字符数，0=不截断 | 2000 |
+| HISTORY_MAX_CHARS | 发给模型的对话历史上限（字符），超出后压缩较早的观察，0=不限制 | 24000 |
 | WORKSPACE_DIR | 工作区目录 | workspace |
 
 ### 3. 运行
@@ -127,4 +128,5 @@ def my_tool(query: str) -> str:
 | tabulate | 表格绘制（draw-tools） |
 | ddgs | 网页搜索（web-search，无需 API Key） |
 | sympy | 数学技能中的方程求解（math-tools） |
+| tzdata | Windows 上的 IANA 时区数据（web-search 的 get_time） |
 

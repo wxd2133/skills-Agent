@@ -26,6 +26,11 @@ from core.skills import (
 
 logger = logging.getLogger(__name__)
 
+# 连续纯思考在这个次数内不占用推理步数；再继续只思考才计入步数。
+_FREE_THINKING_LIMIT = 2
+# 模型请求失败或输出不合协议时，先免费重试这么多次，之后才占用步数或结束本轮。
+_SOFT_FAILURE_LIMIT = 2
+
 # ---------- 系统提示词 ----------
 
 SYSTEM_PROMPT_TEMPLATE = """\
@@ -144,27 +149,64 @@ class ReActKernel:
         """
         self.history.append({"role": "user", "content": user_input})
         step = 0
+        think_streak = 0
+        soft_failures = 0
 
         while step < self.max_steps:
             try:
+                self._trim_history()
                 decision = chat(messages=self._build_messages())
-                if self._push_invalid_decision_feedback(decision):
+            except Exception as exc:
+                soft_failures += 1
+                logger.warning("模型请求失败（第 %d 次）: %s", soft_failures, exc)
+                self.handler.on_status(f"模型请求失败，正在重试（{soft_failures}）：{exc}")
+                self.history.append({
+                    "role": "user",
+                    "content": "[SYSTEM OBSERVATION]\n"
+                    f"模型请求失败：{exc}\n"
+                    "请根据已有信息继续。若无法继续，请直接输出 state=answer。\n"
+                    "[/SYSTEM OBSERVATION]",
+                })
+                if soft_failures > _SOFT_FAILURE_LIMIT:
+                    self._report_step_error(step + 1, exc)
+                    return f"抱歉，处理过程中发生错误：{exc}"
+                continue
+
+            if self._push_invalid_decision_feedback(decision):
+                soft_failures += 1
+                self.handler.on_status("模型输出不符合 JSON 协议，正在要求重新输出。")
+                if soft_failures > _SOFT_FAILURE_LIMIT:
                     step += 1
-                    continue
+                continue
 
-                answer, observation = self._execute_decision(decision, step + 1)
-                if answer is not None:
-                    self.history.append({
-                        "role": "assistant",
-                        "content": json.dumps(decision, ensure_ascii=False),
-                    })
-                    return answer
+            soft_failures = 0
+            state = decision.get("state", "")
+            if state == "thinking":
+                think_streak += 1
+            else:
+                think_streak = 0
 
+            answer, observation = self._execute_decision(decision, step + 1)
+            if answer is not None:
+                self.history.append({
+                    "role": "assistant",
+                    "content": json.dumps(decision, ensure_ascii=False),
+                })
+                return answer
+
+            if state == "thinking" and think_streak > _FREE_THINKING_LIMIT:
+                observation = (
+                    "你已连续多次只思考而没有行动。"
+                    "请立即输出 view_skill、tool_call 或 answer，不要再输出 thinking。"
+                )
+                self.handler.on_observation(step + 1, "thinking", observation)
                 self._append_step_to_history(decision, observation)
                 step += 1
-            except Exception as exc:
-                self._report_step_error(step + 1, exc)
-                return f"抱歉，处理过程中发生错误：{exc}"
+                continue
+
+            self._append_step_to_history(decision, observation)
+            if state != "thinking":
+                step += 1
 
         self.handler.on_error(f"已达到最大推理步数 ({self.max_steps})，请尝试简化问题。")
         return f"已达到最大推理步数 ({self.max_steps})，请尝试简化问题。"
@@ -197,8 +239,9 @@ class ReActKernel:
             logger.warning("技能 '%s' 已存在，将覆盖", skill.name)
             self.skills = [s for s in self.skills if s.name != skill.name]
         self.skills.append(skill)
-        for t in skill.tools:
-            self.tool_registry[t.name] = t
+        # 按当前技能重建注册表，覆盖时去掉已删除的旧工具，再补回系统工具。
+        self.tool_registry = build_tool_registry(self.skills)
+        self._register_system_tools()
         self._system_prompt = _build_system_prompt(self.skills)
         logger.info("已动态加载技能: %s (%d 个工具)", skill.name, len(skill.tools))
 
@@ -264,6 +307,57 @@ class ReActKernel:
     def _build_messages(self) -> list[dict[str, Any]]:
         """系统提示 + 完整历史，供本轮 LLM 调用。"""
         return [{"role": "system", "content": self._system_prompt}] + self.history
+
+    def _trim_history(self) -> None:
+        """压缩较早的观察结果，避免技能手册和工具输出把上下文撑满。"""
+        max_chars = Config.HISTORY_MAX_CHARS
+        if max_chars <= 0 or not self.history:
+            return
+
+        def total() -> int:
+            return sum(len(str(msg.get("content", ""))) for msg in self.history)
+
+        latest_manual: dict[str, int] = {}
+        for index, msg in enumerate(self.history):
+            content = str(msg.get("content", ""))
+            if not content.startswith("[SYSTEM OBSERVATION]\n# "):
+                continue
+            headline = content.split("\n", 2)[1]
+            if headline.startswith("# "):
+                latest_manual[headline[2:].strip()] = index
+
+        for index, msg in enumerate(self.history):
+            content = str(msg.get("content", ""))
+            if not content.startswith("[SYSTEM OBSERVATION]\n# "):
+                continue
+            headline = content.split("\n", 2)[1]
+            if not headline.startswith("# "):
+                continue
+            name = headline[2:].strip()
+            if latest_manual.get(name) != index:
+                msg["content"] = (
+                    "[SYSTEM OBSERVATION]\n"
+                    f"（技能「{name}」的完整说明已在后续步骤重新提供，此处省略）\n"
+                    "[/SYSTEM OBSERVATION]"
+                )
+
+        if total() <= max_chars:
+            return
+
+        protected = 4
+        for msg in self.history[:-protected] if len(self.history) > protected else []:
+            content = str(msg.get("content", ""))
+            if content.startswith("[SYSTEM OBSERVATION]") and len(content) > 800:
+                msg["content"] = content[:700] + "\n... (较早的观察已截断)\n[/SYSTEM OBSERVATION]"
+
+        def is_real_user(msg: dict[str, Any]) -> bool:
+            return msg.get("role") == "user" and not str(msg.get("content", "")).startswith("[SYSTEM OBSERVATION]")
+
+        while total() > max_chars and len(self.history) > 2:
+            real_users = [msg for msg in self.history if is_real_user(msg)]
+            if is_real_user(self.history[0]) and len(real_users) == 1:
+                break
+            self.history.pop(0)
 
     def _push_invalid_decision_feedback(self, decision: dict[str, Any]) -> bool:
         """若决策结构不合法则追加反馈到 history 并返回 True，否则返回 False。"""
